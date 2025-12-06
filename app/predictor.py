@@ -288,13 +288,13 @@ class StockPredictor:
             "stop_loss": round(stop_loss, 2)
         }
     
-    def predict(self, ticker: str, period: str = "2y") -> Optional[Dict]:
+    def predict(self, ticker: str) -> Optional[Dict]:
         """
-        Main prediction pipeline
+        Main prediction pipeline (using optimal 2-year period)
         
         Steps:
         1. Normalize ticker
-        2. Fetch historical data
+        2. Fetch historical data (2 years - optimal for accuracy)
         3. Generate features
         4. Train model
         5. Make prediction
@@ -302,12 +302,14 @@ class StockPredictor:
         
         Args:
             ticker: Stock symbol
-            period: Historical data period
             
         Returns:
             Dictionary with prediction results or None if failed
         """
         try:
+            # Use optimal period for best model performance
+            period = "2y"
+            
             # Step 1: Normalize ticker symbol
             ticker = self.normalize_ticker(ticker)
             print(f"Fetching data for: {ticker}")
@@ -395,3 +397,136 @@ class StockPredictor:
         except Exception as e:
             print(f"Error in prediction pipeline: {e}")
             raise e
+    
+    def get_multi_timeframe_analysis(self, ticker: str) -> Optional[Dict]:
+        """
+        Get weekly, monthly, and yearly predictions and analysis
+        
+        Args:
+            ticker: Stock symbol
+            
+        Returns:
+            Dictionary with multi-timeframe analysis
+        """
+        try:
+            ticker = self.normalize_ticker(ticker)
+            
+            # Fetch longer data for yearly analysis
+            df = self.fetch_data(ticker, period="3y")
+            if df is None or df.empty:
+                return None
+            
+            current_price = df['Close'].iloc[-1]
+            
+            # Weekly Analysis (last 7 days)
+            if len(df) >= 7:
+                week_ago = df['Close'].iloc[-7]
+                weekly_change = ((current_price - week_ago) / week_ago) * 100
+                weekly_high = df['High'].tail(7).max()
+                weekly_low = df['Low'].tail(7).min()
+                weekly_volume = df['Volume'].tail(7).mean()
+            else:
+                weekly_change = 0
+                weekly_high = current_price
+                weekly_low = current_price
+                weekly_volume = df['Volume'].mean()
+            
+            # Monthly Analysis (last 30 days)
+            if len(df) >= 30:
+                month_ago = df['Close'].iloc[-30]
+                monthly_change = ((current_price - month_ago) / month_ago) * 100
+                monthly_high = df['High'].tail(30).max()
+                monthly_low = df['Low'].tail(30).min()
+                monthly_volume = df['Volume'].tail(30).mean()
+            else:
+                monthly_change = 0
+                monthly_high = current_price
+                monthly_low = current_price
+                monthly_volume = df['Volume'].mean()
+            
+            # Yearly Analysis (last 252 trading days ≈ 1 year)
+            if len(df) >= 252:
+                year_ago = df['Close'].iloc[-252]
+                yearly_change = ((current_price - year_ago) / year_ago) * 100
+                yearly_high = df['High'].tail(252).max()
+                yearly_low = df['Low'].tail(252).min()
+                yearly_volume = df['Volume'].tail(252).mean()
+            else:
+                year_ago = df['Close'].iloc[0]
+                yearly_change = ((current_price - year_ago) / year_ago) * 100
+                yearly_high = df['High'].max()
+                yearly_low = df['Low'].min()
+                yearly_volume = df['Volume'].mean()
+            
+            # Calculate predictions for different timeframes
+            weekly_prediction = self._predict_timeframe(df, days=7)
+            monthly_prediction = self._predict_timeframe(df, days=30)
+            yearly_prediction = self._predict_timeframe(df, days=252)
+            
+            return {
+                "ticker": ticker,
+                "current_price": round(float(current_price), 2),
+                "weekly": {
+                    "change_pct": round(float(weekly_change), 2),
+                    "high": round(float(weekly_high), 2),
+                    "low": round(float(weekly_low), 2),
+                    "avg_volume": int(weekly_volume),
+                    "predicted_price": round(float(weekly_prediction), 2),
+                    "predicted_change": round(((weekly_prediction - current_price) / current_price) * 100, 2),
+                    "trend": "Bullish" if weekly_change > 0 else "Bearish"
+                },
+                "monthly": {
+                    "change_pct": round(float(monthly_change), 2),
+                    "high": round(float(monthly_high), 2),
+                    "low": round(float(monthly_low), 2),
+                    "avg_volume": int(monthly_volume),
+                    "predicted_price": round(float(monthly_prediction), 2),
+                    "predicted_change": round(((monthly_prediction - current_price) / current_price) * 100, 2),
+                    "trend": "Bullish" if monthly_change > 0 else "Bearish"
+                },
+                "yearly": {
+                    "change_pct": round(float(yearly_change), 2),
+                    "high": round(float(yearly_high), 2),
+                    "low": round(float(yearly_low), 2),
+                    "avg_volume": int(yearly_volume),
+                    "predicted_price": round(float(yearly_prediction), 2),
+                    "predicted_change": round(((yearly_prediction - current_price) / current_price) * 100, 2),
+                    "trend": "Bullish" if yearly_change > 0 else "Bearish"
+                }
+            }
+        
+        except Exception as e:
+            print(f"Error in multi-timeframe analysis: {e}")
+            return None
+    
+    def _predict_timeframe(self, df: pd.DataFrame, days: int) -> float:
+        """
+        Predict price for a specific timeframe
+        
+        Args:
+            df: Historical data
+            days: Number of days to predict ahead
+            
+        Returns:
+            Predicted price
+        """
+        try:
+            # Use simple moving average and momentum for timeframe prediction
+            if len(df) < days:
+                return df['Close'].iloc[-1]
+            
+            recent_data = df.tail(days)
+            avg_daily_change = recent_data['Close'].pct_change().mean()
+            volatility = recent_data['Close'].pct_change().std()
+            
+            # Simple prediction based on trend
+            current_price = df['Close'].iloc[-1]
+            predicted_price = current_price * (1 + avg_daily_change * days)
+            
+            # Add some conservative adjustment
+            predicted_price = predicted_price * 0.95 if predicted_price > current_price else predicted_price * 1.05
+            
+            return predicted_price
+        
+        except:
+            return df['Close'].iloc[-1]

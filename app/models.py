@@ -1,43 +1,16 @@
 from pydantic import BaseModel, Field, validator
 from typing import Dict, Optional, List
+from datetime import datetime
 
 class PredictionRequest(BaseModel):
     """Request model for stock prediction"""
     ticker: str = Field(..., description="Stock ticker symbol (e.g., RELIANCE, TCS)")
-    period: str = Field(default="2y", description="Historical data period (1mo, 3mo, 6mo, 1y, 2y, 5y)")
     
     @validator('ticker')
     def validate_ticker(cls, v):
         if not v or not v.strip():
             raise ValueError("Ticker cannot be empty")
         return v.strip().upper()
-    
-    @validator('period')
-    def validate_period(cls, v):
-        valid_periods = ['1mo', '3mo', '6mo', '1y', '2y', '5y', '10y', 'max']
-        if v not in valid_periods:
-            raise ValueError(f"Period must be one of {valid_periods}")
-        return v
-
-class CompareRequest(BaseModel):
-    """Request model for stock comparison"""
-    tickers: List[str] = Field(..., min_items=2, max_items=10, description="List of stock tickers to compare")
-    period: str = Field(default="6mo", description="Comparison period")
-    
-    @validator('tickers')
-    def validate_tickers(cls, v):
-        if not v or len(v) < 2:
-            raise ValueError("Please provide at least 2 tickers")
-        if len(v) > 10:
-            raise ValueError("Maximum 10 tickers allowed")
-        return [ticker.strip().upper() for ticker in v]
-    
-    @validator('period')
-    def validate_period(cls, v):
-        valid_periods = ['1mo', '3mo', '6mo', '1y', '2y', '5y']
-        if v not in valid_periods:
-            raise ValueError(f"Period must be one of {valid_periods}")
-        return v
 
 class PredictionResponse(BaseModel):
     """Response model for stock prediction"""
@@ -52,6 +25,51 @@ class PredictionResponse(BaseModel):
     model_mse: float
     direction_accuracy: float
     feature_importance: Dict[str, float]
+
+class MultiTimeframeAnalysis(BaseModel):
+    """Multi-timeframe analysis response"""
+    ticker: str
+    current_price: float
+    weekly: Dict
+    monthly: Dict
+    yearly: Dict
+
+class WatchlistRequest(BaseModel):
+    """Request to add stock to watchlist"""
+    ticker: str
+    target_price: Optional[float] = None
+    notes: Optional[str] = None
+
+class PortfolioAddRequest(BaseModel):
+    """Request to add stock to portfolio"""
+    ticker: str
+    quantity: int = Field(..., gt=0)
+    buy_price: float = Field(..., gt=0)
+    buy_date: Optional[str] = None
+    notes: Optional[str] = None
+
+class PortfolioSellRequest(BaseModel):
+    """Request to sell stock from portfolio"""
+    ticker: str
+    quantity: int = Field(..., gt=0)
+    sell_price: float = Field(..., gt=0)
+    sell_date: Optional[str] = None
+    notes: Optional[str] = None
+
+class ReminderRequest(BaseModel):
+    """Request to create reminder"""
+    title: str
+    message: str
+    reminder_time: str
+    reminder_type: str = "GENERAL"
+    ticker: Optional[str] = None
+
+class EmailRequest(BaseModel):
+    """Request to send email"""
+    to_email: str
+    subject: str
+    body: str
+    body_html: Optional[str] = None
 
 class StockInfo(BaseModel):
     """Stock information model"""

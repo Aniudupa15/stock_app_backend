@@ -171,6 +171,36 @@ def test_market_overview():
         print_error(f"Error: {e}")
         return False
 
+def test_market_status():
+    """Test market status endpoint (currently disabled)"""
+    print_header("Testing Market Status (Disabled)")
+    try:
+        response = requests.get(f"{BASE_URL}/market/status", timeout=10)
+        if response.status_code == 501:
+            print_success("Market Status is correctly disabled (HTTP 501)")
+            return True
+        else:
+            print_error(f"Market Status returned unexpected status: {response.status_code}")
+            return False
+    except Exception as e:
+        print_error(f"Error: {e}")
+        return False
+
+def test_holidays():
+    """Test market holidays endpoint (currently disabled)"""
+    print_header("Testing Market Holidays (Disabled)")
+    try:
+        response = requests.get(f"{BASE_URL}/market/holidays", timeout=10)
+        if response.status_code == 501:
+            print_success("Market Holidays is correctly disabled (HTTP 501)")
+            return True
+        else:
+            print_error(f"Market Holidays returned unexpected status: {response.status_code}")
+            return False
+    except Exception as e:
+        print_error(f"Error: {e}")
+        return False
+        
 def test_stock_analysis():
     """Test comprehensive stock analysis endpoint"""
     print_header("Testing Stock Analysis")
@@ -219,14 +249,16 @@ def test_comparison():
     print_header("Testing Stock Comparison")
     try:
         tickers = ["RELIANCE", "TCS", "INFY"]
-        print_info(f"Comparing: {', '.join(tickers)}")
+        period = "6mo"
+        print_info(f"Comparing: {', '.join(tickers)} (Period: {period})")
         
-        payload = {
-            "tickers": tickers,
-            "period": "6mo"
-        }
+        # FIX: The API endpoint uses Query parameters. Construct the URL accordingly.
+        query_params = "&".join([f"tickers={t}" for t in tickers])
         
-        response = requests.post(f"{BASE_URL}/compare", json=payload, timeout=60)
+        url = f"{BASE_URL}/compare?{query_params}&period={period}"
+        
+        # Send a POST request with the correctly formed query string
+        response = requests.post(url, timeout=60)
         
         if response.status_code == 200:
             data = response.json()
@@ -299,13 +331,15 @@ def main():
         ("Stock Comparison", test_comparison),
         ("ML Prediction", test_prediction),
         ("Batch Prediction", test_batch_prediction),
+        ("Market Status", test_market_status),
+        ("Market Holidays", test_holidays),
     ]
     
     for name, test_func in tests:
         try:
             result = test_func()
             results.append((name, result))
-            time.sleep(1)  # Small delay between tests
+            time.sleep(1) # Small delay between tests
         except Exception as e:
             print_error(f"Test failed with exception: {e}")
             results.append((name, False))
@@ -326,11 +360,11 @@ def main():
     if passed == total:
         print(f"\n{Colors.GREEN}{Colors.BOLD}🎉 All tests passed! API is fully functional.{Colors.END}")
     else:
-        print(f"\n{Colors.YELLOW}{Colors.BOLD}⚠️  Some tests failed. Check the logs above.{Colors.END}")
+        print(f"\n{Colors.YELLOW}{Colors.BOLD}⚠️ Some tests failed. Check the logs above.{Colors.END}")
 
 if __name__ == "__main__":
     try:
-        main()
+        main()                  
     except KeyboardInterrupt:
         print(f"\n\n{Colors.YELLOW}Tests interrupted by user.{Colors.END}")
     except Exception as e:
