@@ -26,14 +26,14 @@ from app.models import (
     MarketOverview,
     StockComparison
 )
-from predictor import StockPredictor
-from market_analyzer import MarketAnalyzer
-from portfolio_manager import PortfolioManager
-from market_schedule import MarketSchedule
-from notification_service import NotificationService
-from price_alert_system import PriceAlertSystem
-from daily_recommendations import DailyRecommendations
-from ipo_analyzer import IPOAnalyzer
+from app.predictor import StockPredictor
+from app.market_analyzer import MarketAnalyzer
+from app.portfolio_manager import PortfolioManager
+from app.market_schedule import MarketSchedule
+from app.notification_service import NotificationService
+from app.price_alert_system import PriceAlertSystem
+from app.daily_recommendations import DailyRecommendations
+from app.ipo_analyzer import IPOAnalyzer
 
 # Configure logging
 logging.basicConfig(
