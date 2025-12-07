@@ -10,7 +10,7 @@ import os
 
 load_dotenv()
 
-from models import (
+from app.models import (
     PredictionRequest, 
     PredictionResponse,
     MultiTimeframeAnalysis,
