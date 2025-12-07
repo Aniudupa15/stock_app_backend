@@ -1,6 +1,6 @@
 from typing import List, Dict
-from predictor import StockPredictor
-from market_analyzer import MarketAnalyzer
+from app.predictor import StockPredictor
+from app.market_analyzer import MarketAnalyzer
 from datetime import datetime
 
 class DailyRecommendations:
