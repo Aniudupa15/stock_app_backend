@@ -1,0 +1,68 @@
+[
+  {
+    "id": 1,
+    "company_name": "Sample Tech IPO",
+    "open_date": "2025-12-14",
+    "close_date": "2025-12-17",
+    "listing_date": "2025-12-22",
+    "price_band": "\u20b9300-350",
+    "lot_size": 40,
+    "issue_size": "\u20b9500 Cr",
+    "category": "Mainboard",
+    "status": "Upcoming"
+  },
+  {
+    "id": 2,
+    "company_name": "Demo Tech Corp",
+    "open_date": "2025-12-08",
+    "close_date": "2025-12-14",
+    "listing_date": "2025-12-21",
+    "price_band": "\u20b9200-250",
+    "lot_size": 50,
+    "issue_size": "\u20b9300 Cr",
+    "category": "Mainboard",
+    "sector": "Technology",
+    "status": "Upcoming",
+    "notes": null,
+    "added_at": "2025-12-07T11:52:10.258173",
+    "analysis": {
+      "company": "Demo Tech Corp",
+      "recommendation": "NEUTRAL",
+      "score": 1.5,
+      "factors": [
+        "Listed on mainboard - better liquidity"
+      ],
+      "risks": [],
+      "opportunities": [
+        "Affordable price point for retail investors"
+      ]
+    }
+  },
+  {
+    "id": 3,
+    "company_name": "Demo Tech Corp",
+    "open_date": "2025-12-08",
+    "close_date": "2025-12-14",
+    "listing_date": "2025-12-21",
+    "price_band": "\u20b9200-250",
+    "lot_size": 50,
+    "issue_size": "\u20b9300 Cr",
+    "category": "Mainboard",
+    "sector": "Technology",
+    "status": "Upcoming",
+    "notes": null,
+    "added_at": "2025-12-07T11:55:56.752396",
+    "analysis": {
+      "company": "Demo Tech Corp",
+      "recommendation": "NEUTRAL",
+      "score": 1.5,
+      "factors": [
+        "Listed on mainboard - better liquidity"
+      ],
+      "risks": [],
+      "opportunities": [
+        "Affordable price point for retail investors"
+      ]
+    }
+  }
+]

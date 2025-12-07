@@ -1,0 +1,18 @@
+[
+  {
+    "ticker": "BCG",
+    "quantity": 2000,
+    "avg_buy_price": 17.49,
+    "buy_date": "2025-12-06T20:25:07.606096",
+    "last_updated": "2025-12-06T20:25:09.040281",
+    "notes": null
+  },
+  {
+    "ticker": "TCS",
+    "quantity": 20,
+    "avg_buy_price": 3650.0,
+    "buy_date": "2025-12-07T11:52:21.554877",
+    "last_updated": "2025-12-07T11:56:08.054875",
+    "notes": "Demo purchase"
+  }
+]

@@ -5,6 +5,10 @@ from contextlib import asynccontextmanager
 import uvicorn
 import logging
 from typing import List, Optional
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 
 from models import (
     PredictionRequest, 
@@ -25,8 +29,11 @@ from models import (
 from predictor import StockPredictor
 from market_analyzer import MarketAnalyzer
 from portfolio_manager import PortfolioManager
-# from market_schedule import MarketSchedule # MarketSchedule is missing/commented out
+from market_schedule import MarketSchedule
 from notification_service import NotificationService
+from price_alert_system import PriceAlertSystem
+from daily_recommendations import DailyRecommendations
+from ipo_analyzer import IPOAnalyzer
 
 # Configure logging
 logging.basicConfig(
@@ -531,7 +538,7 @@ async def compare_stocks(
             detail=f"Error comparing stocks: {str(e)}"
         )
 
-# ==================== MARKET SCHEDULE & HOLIDAYS (DISABLED) ====================
+# ==================== MARKET SCHEDULE & HOLIDAYS ====================
 
 @app.get(
     "/market/status",
@@ -541,12 +548,31 @@ async def compare_stocks(
 async def get_market_status():
     """
     Get current market status and timings
+    
+    **Returns:**
+    - Whether market is currently open
+    - Current trading session (pre-market, market hours, post-market)
+    - Time until next market open/close
+    - Market timings
     """
-    # Feature disabled due to missing MarketSchedule class
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Market Schedule functionality is currently disabled (MarketSchedule class is missing)"
-    )
+    try:
+        schedule = MarketSchedule()
+        status = schedule.get_market_status()
+        timings = schedule.get_market_timings()
+        time_until_open = schedule.time_until_market_open()
+        time_until_close = schedule.time_until_market_close()
+        
+        return {
+            **status,
+            "timings": timings,
+            "countdown": time_until_open if not status['is_open'] else time_until_close
+        }
+    except Exception as e:
+        logger.error(f"Error getting market status: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting market status: {str(e)}"
+        )
 
 @app.get(
     "/market/holidays",
@@ -556,12 +582,28 @@ async def get_market_status():
 async def get_market_holidays(days: int = Query(default=90, ge=1, le=365)):
     """
     Get upcoming market holidays
+    
+    **Parameters:**
+    - **days**: Look ahead N days (default: 90, max: 365)
+    
+    **Returns:**
+    - List of upcoming holidays with dates and names
     """
-    # Feature disabled due to missing MarketSchedule class
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Market Schedule functionality is currently disabled (MarketSchedule class is missing)"
-    )
+    try:
+        schedule = MarketSchedule()
+        holidays = schedule.get_upcoming_holidays(days)
+        
+        return {
+            "upcoming_holidays": holidays,
+            "total_holidays": len(holidays),
+            "days_checked": days
+        }
+    except Exception as e:
+        logger.error(f"Error getting holidays: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting holidays: {str(e)}"
+        )
 
 # ==================== PORTFOLIO MANAGEMENT ====================
 
@@ -877,38 +919,418 @@ async def get_reminders(status: Optional[str] = None):
             detail=f"Error getting reminders: {str(e)}"
         )
 
+# ==================== PRICE ALERTS ====================
+
 @app.post(
-    "/email/send",
-    tags=["Notifications"],
-    summary="Send Custom Email"
+    "/alerts/create",
+    tags=["Price Alerts"],
+    summary="Create Price Alert"
 )
-async def send_email(request: EmailRequest):
+async def create_price_alert(
+    ticker: str,
+    target_price: float,
+    condition: str = Query(..., regex="^(above|below)$"),
+    email: Optional[str] = None,
+    notes: Optional[str] = None
+):
     """
-    Send custom email notification
+    Create a price alert that triggers when stock reaches target price
     
-    **Note:** Requires EMAIL_ADDRESS and EMAIL_PASSWORD environment variables
+    **Parameters:**
+    - **ticker**: Stock symbol
+    - **target_price**: Price to trigger alert
+    - **condition**: "above" or "below"
+    - **email**: Email for notification (optional)
+    - **notes**: Custom notes (optional)
     
-    **For Gmail:**
-    1. Enable 2FA
-    2. Generate App Password: https://support.google.com/accounts/answer/185833
-    3. Use App Password as EMAIL_PASSWORD
+    **Example:**
+    - Alert when RELIANCE goes above ₹3000
+    - Alert when TCS falls below ₹3500
     """
     try:
+        alert_system = PriceAlertSystem()
+        result = alert_system.create_alert(ticker, target_price, condition, email, notes)
+        return result
+    except Exception as e:
+        logger.error(f"Error creating alert: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creating alert: {str(e)}"
+        )
+
+@app.get(
+    "/alerts",
+    tags=["Price Alerts"],
+    summary="Get All Price Alerts"
+)
+async def get_price_alerts(
+    status: Optional[str] = Query(None, regex="^(ACTIVE|TRIGGERED)$"),
+    ticker: Optional[str] = None
+):
+    """Get all price alerts with optional filters"""
+    try:
+        alert_system = PriceAlertSystem()
+        alerts = alert_system.get_alerts(status, ticker)
+        return {
+            "alerts": alerts,
+            "total": len(alerts)
+        }
+    except Exception as e:
+        logger.error(f"Error getting alerts: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting alerts: {str(e)}"
+        )
+
+@app.post(
+    "/alerts/check",
+    tags=["Price Alerts"],
+    summary="Check and Trigger Alerts"
+)
+async def check_price_alerts():
+    """
+    Check all active alerts and trigger if conditions are met
+    
+    **Returns:**
+    - List of triggered alerts with email notifications sent
+    """
+    try:
+        alert_system = PriceAlertSystem()
         notif_service = NotificationService()
-        result = notif_service.send_email(
-            request.to_email,
-            request.subject,
-            request.body,
-            request.body_html
+        
+        # Check alerts
+        triggered = alert_system.check_alerts()
+        
+        # Send email notifications
+        for alert in triggered:
+            if alert.get('email'):
+                notif_service.send_price_alert_email(
+                    alert['email'],
+                    alert['ticker'],
+                    alert['triggered_price'],
+                    alert['target_price'],
+                    alert['condition']
+                )
+        
+        return {
+            "checked_at": datetime.now().isoformat(),
+            "triggered_alerts": len(triggered),
+            "alerts": triggered
+        }
+    except Exception as e:
+        logger.error(f"Error checking alerts: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error checking alerts: {str(e)}"
+        )
+
+@app.delete(
+    "/alerts/{alert_id}",
+    tags=["Price Alerts"],
+    summary="Delete Price Alert"
+)
+async def delete_price_alert(alert_id: int):
+    """Delete a specific price alert"""
+    try:
+        alert_system = PriceAlertSystem()
+        result = alert_system.delete_alert(alert_id)
+        return result
+    except Exception as e:
+        logger.error(f"Error deleting alert: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting alert: {str(e)}"
+        )
+
+@app.get(
+    "/alerts/summary",
+    tags=["Price Alerts"],
+    summary="Get Alerts Summary"
+)
+async def get_alerts_summary():
+    """Get summary of all alerts"""
+    try:
+        alert_system = PriceAlertSystem()
+        summary = alert_system.get_alert_summary()
+        return summary
+    except Exception as e:
+        logger.error(f"Error getting summary: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting summary: {str(e)}"
+        )
+
+# ==================== DAILY RECOMMENDATIONS ====================
+
+@app.get(
+    "/recommendations/daily",
+    tags=["Recommendations"],
+    summary="Get Daily Buy/Sell Recommendations"
+)
+async def get_daily_recommendations(
+    min_score: int = Query(default=3, ge=1, le=5)
+):
+    """
+    Get daily buy/sell recommendations based on comprehensive analysis
+    
+    **Analyzes:**
+    - ML predictions
+    - Technical indicators (RSI, MACD, Moving Averages)
+    - Volume analysis
+    - Trend strength
+    
+    **Parameters:**
+    - **min_score**: Minimum score for recommendation (1-5)
+    
+    **Returns:**
+    - Top buy recommendations
+    - Top sell recommendations
+    - Hold recommendations
+    - Detailed analysis for each stock
+    """
+    try:
+        recommender = DailyRecommendations()
+        recommendations = recommender.get_daily_recommendations(min_score=min_score)
+        return recommendations
+    except Exception as e:
+        logger.error(f"Error getting recommendations: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting recommendations: {str(e)}"
+        )
+
+@app.get(
+    "/recommendations/top-picks",
+    tags=["Recommendations"],
+    summary="Get Top Stock Picks"
+)
+async def get_top_picks(
+    category: str = Query(default="buy", regex="^(buy|sell|momentum)$"),
+    limit: int = Query(default=5, ge=1, le=10)
+):
+    """
+    Get top stock picks for the day
+    
+    **Categories:**
+    - **buy**: Top buy recommendations
+    - **sell**: Top sell recommendations
+    - **momentum**: High momentum stocks
+    
+    **Parameters:**
+    - **category**: Type of picks
+    - **limit**: Number of picks (1-10)
+    """
+    try:
+        recommender = DailyRecommendations()
+        picks = recommender.get_top_picks(category, limit)
+        return {
+            "category": category,
+            "picks": picks,
+            "total": len(picks)
+        }
+    except Exception as e:
+        logger.error(f"Error getting top picks: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting top picks: {str(e)}"
+        )
+
+# ==================== IPO ANALYSIS ====================
+
+@app.post(
+    "/ipo/add",
+    tags=["IPO Analysis"],
+    summary="Add IPO for Tracking"
+)
+async def add_ipo(
+    company_name: str,
+    open_date: str,
+    close_date: str,
+    listing_date: str,
+    price_band: str,
+    lot_size: int,
+    issue_size: str,
+    category: str = "Mainboard",
+    sector: Optional[str] = None,
+    notes: Optional[str] = None
+):
+    """
+    Add a new IPO for tracking and analysis
+    
+    **Example:**
+    ```json
+    {
+        "company_name": "ABC Technologies",
+        "open_date": "2024-12-15",
+        "close_date": "2024-12-18",
+        "listing_date": "2024-12-22",
+        "price_band": "₹300-350",
+        "lot_size": 40,
+        "issue_size": "₹500 Cr",
+        "category": "Mainboard",
+        "sector": "Technology"
+    }
+    ```
+    """
+    try:
+        ipo_analyzer = IPOAnalyzer()
+        result = ipo_analyzer.add_ipo(
+            company_name, open_date, close_date, listing_date,
+            price_band, lot_size, issue_size, category, sector, notes
         )
         return result
     except Exception as e:
-        logger.error(f"Error sending email: {e}")
+        logger.error(f"Error adding IPO: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error sending email: {str(e)}"
+            detail=f"Error adding IPO: {str(e)}"
         )
 
+@app.get(
+    "/ipo/list",
+    tags=["IPO Analysis"],
+    summary="Get All IPOs"
+)
+async def get_ipos(
+    status: Optional[str] = Query(None, regex="^(Upcoming|Open|Closed)$"),
+    category: Optional[str] = Query(None, regex="^(Mainboard|SME)$")
+):
+    """
+    Get all IPOs with optional filters
+    
+    **Status:**
+    - Upcoming: Not yet opened
+    - Open: Currently open for subscription
+    - Closed: Subscription closed
+    
+    **Category:**
+    - Mainboard: Regular exchange listing
+    - SME: Small and Medium Enterprise
+    """
+    try:
+        ipo_analyzer = IPOAnalyzer()
+        ipos = ipo_analyzer.get_ipos(status, category)
+        return {
+            "ipos": ipos,
+            "total": len(ipos)
+        }
+    except Exception as e:
+        logger.error(f"Error getting IPOs: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting IPOs: {str(e)}"
+        )
+
+@app.get(
+    "/ipo/upcoming",
+    tags=["IPO Analysis"],
+    summary="Get Upcoming IPOs"
+)
+async def get_upcoming_ipos(
+    days: int = Query(default=30, ge=1, le=90)
+):
+    """Get IPOs opening in next N days"""
+    try:
+        ipo_analyzer = IPOAnalyzer()
+        ipos = ipo_analyzer.get_upcoming_ipos(days)
+        return {
+            "upcoming_ipos": ipos,
+            "total": len(ipos),
+            "period_days": days
+        }
+    except Exception as e:
+        logger.error(f"Error getting upcoming IPOs: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting upcoming IPOs: {str(e)}"
+        )
+
+@app.post(
+    "/ipo/{ipo_id}/analyze",
+    tags=["IPO Analysis"],
+    summary="Analyze IPO"
+)
+async def analyze_ipo(ipo_id: int):
+    """
+    Analyze an IPO and get recommendation
+    
+    **Returns:**
+    - Recommendation (SUBSCRIBE, NEUTRAL, AVOID)
+    - Analysis score
+    - Key factors
+    - Risks and opportunities
+    """
+    try:
+        ipo_analyzer = IPOAnalyzer()
+        analysis = ipo_analyzer.analyze_ipo(ipo_id)
+        return analysis
+    except Exception as e:
+        logger.error(f"Error analyzing IPO: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error analyzing IPO: {str(e)}"
+        )
+
+@app.post(
+    "/ipo/{ipo_id}/reminder",
+    tags=["IPO Analysis"],
+    summary="Set IPO Reminder"
+)
+async def set_ipo_reminder(
+    ipo_id: int,
+    reminder_date: str,
+    reminder_type: str = Query(..., regex="^(OPENING|CLOSING|LISTING)$"),
+    email: Optional[str] = None
+):
+    """
+    Set reminder for IPO event
+    
+    **Reminder Types:**
+    - OPENING: Day IPO opens
+    - CLOSING: Day IPO closes
+    - LISTING: Listing day
+    """
+    try:
+        ipo_analyzer = IPOAnalyzer()
+        result = ipo_analyzer.set_ipo_reminder(ipo_id, reminder_date, reminder_type, email)
+        return result
+    except Exception as e:
+        logger.error(f"Error setting reminder: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error setting reminder: {str(e)}"
+        )
+
+@app.get(
+    "/ipo/calendar",
+    tags=["IPO Analysis"],
+    summary="Get IPO Calendar"
+)
+async def get_ipo_calendar(
+    month: Optional[int] = Query(None, ge=1, le=12)
+):
+    """
+    Get IPO calendar for a month
+    
+    **Parameters:**
+    - **month**: Month number (1-12), defaults to current month
+    
+    **Returns:**
+    - Calendar with IPOs organized by date
+    - Opening and closing events
+    """
+    try:
+        ipo_analyzer = IPOAnalyzer()
+        calendar = ipo_analyzer.get_ipo_calendar(month)
+        return calendar
+    except Exception as e:
+        logger.error(f"Error getting calendar: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting calendar: {str(e)}"
+        )
+
+# ==================== EMAIL (UPDATED) ====================
 @app.post(
     "/email/portfolio-summary",
     tags=["Notifications"],
@@ -920,6 +1342,12 @@ async def email_portfolio_summary(to_email: str):
     
     **Parameters:**
     - **to_email**: Recipient email address
+    
+    **Email includes:**
+    - Total investment and current value
+    - Overall profit/loss
+    - Individual stock performance
+    - Formatted HTML table
     """
     try:
         portfolio_manager = PortfolioManager()
@@ -928,6 +1356,13 @@ async def email_portfolio_summary(to_email: str):
         
         # Get portfolio and current prices
         portfolio = portfolio_manager.get_portfolio()
+        
+        if not portfolio:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Portfolio is empty. Add stocks first."
+            )
+        
         current_prices = {}
         for holding in portfolio:
             ticker = holding['ticker']
@@ -941,6 +1376,8 @@ async def email_portfolio_summary(to_email: str):
         # Send email
         result = notif_service.send_portfolio_summary_email(to_email, valuation)
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error sending portfolio summary: {e}")
         raise HTTPException(

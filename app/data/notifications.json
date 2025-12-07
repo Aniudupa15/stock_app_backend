@@ -1,0 +1,22 @@
+[
+  {
+    "id": 1,
+    "type": "EMAIL",
+    "recipient": "aniudupa15@gmail.com",
+    "subject": "Stock Alert",
+    "message": "Your stock RELIANCE has reached target price!",
+    "success": false,
+    "error": "(535, b'5.7.8 Username and Password not accepted. For more information, go to\\n5.7.8  https://support.google.com/mail/?p=BadCredentials 98e67ed59e1d1-3496294bb28sm5992151a91.14 - gsmtp')",
+    "timestamp": "2025-12-06T23:47:14.764266"
+  },
+  {
+    "id": 2,
+    "type": "EMAIL",
+    "recipient": "aniudupa15@gmail.com",
+    "subject": "Stock Alert",
+    "message": "Your stock RELIANCE has reached target price!",
+    "success": true,
+    "error": null,
+    "timestamp": "2025-12-06T23:48:56.215795"
+  }
+]

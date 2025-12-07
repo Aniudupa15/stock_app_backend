@@ -1,0 +1,22 @@
+[
+  {
+    "id": 1,
+    "ipo_id": 2,
+    "company_name": "Demo Tech Corp",
+    "reminder_date": "2025-12-08",
+    "reminder_type": "OPENING",
+    "email": null,
+    "status": "ACTIVE",
+    "created_at": "2025-12-07T11:52:16.443991"
+  },
+  {
+    "id": 2,
+    "ipo_id": 3,
+    "company_name": "Demo Tech Corp",
+    "reminder_date": "2025-12-08",
+    "reminder_type": "OPENING",
+    "email": null,
+    "status": "ACTIVE",
+    "created_at": "2025-12-07T11:56:02.923941"
+  }
+]

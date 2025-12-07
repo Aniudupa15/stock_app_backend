@@ -1,0 +1,38 @@
+[
+  {
+    "type": "BUY",
+    "ticker": "BCG",
+    "quantity": 1000,
+    "price": 17.49,
+    "date": "2025-12-06T20:25:07.606096",
+    "total_value": 17490.0,
+    "notes": null
+  },
+  {
+    "type": "BUY",
+    "ticker": "BCG",
+    "quantity": 1000,
+    "price": 17.49,
+    "date": "2025-12-06T20:25:09.040252",
+    "total_value": 17490.0,
+    "notes": null
+  },
+  {
+    "type": "BUY",
+    "ticker": "TCS",
+    "quantity": 10,
+    "price": 3650.0,
+    "date": "2025-12-07T11:52:21.554877",
+    "total_value": 36500.0,
+    "notes": "Demo purchase"
+  },
+  {
+    "type": "BUY",
+    "ticker": "TCS",
+    "quantity": 10,
+    "price": 3650.0,
+    "date": "2025-12-07T11:56:08.054830",
+    "total_value": 36500.0,
+    "notes": "Demo purchase"
+  }
+]

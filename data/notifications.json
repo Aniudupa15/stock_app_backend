@@ -1,1 +1,12 @@
-[]
+[
+  {
+    "id": 1,
+    "type": "EMAIL",
+    "recipient": "aniudupa15@gmail.com",
+    "subject": "\ud83d\udea8 Price Alert: BCG.NS",
+    "message": "\nPrice Alert for BCG.NS\n\nCurrent Price: \u20b911.40999984741211\nTarget Price: \u20b917.41\nCondition: below\n\nTh...",
+    "success": true,
+    "error": null,
+    "timestamp": "2025-12-07T12:05:51.617273"
+  }
+]
