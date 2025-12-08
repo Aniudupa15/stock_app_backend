@@ -533,289 +533,346 @@
 
 
 
-# predictor.py
-import os
+# market_analyzer.py
 import requests
 import pandas as pd
 import numpy as np
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import mean_squared_error
-from typing import Optional, Dict, Tuple
-import warnings
+from typing import List, Dict, Optional
 from datetime import datetime, timedelta
+import warnings
+import time
 
 warnings.filterwarnings('ignore')
 
-ALPHAVANTAGE_API_KEY = os.getenv("ALPHAVANTAGE_API_KEY")
+_NSE_BASE = "https://www.nseindia.com"
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64)",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://www.nseindia.com"
+}
 
-def _alpha_vantage_history(symbol: str, outputsize: str = "compact") -> Optional[pd.DataFrame]:
-    """
-    Fetch daily adjusted history from Alpha Vantage and return a DataFrame
-    with columns ['Open','High','Low','Close','Volume'] and datetime index (ascending).
-    outputsize: 'compact' (~100 days) or 'full' (full history).
-    """
-    if not ALPHAVANTAGE_API_KEY:
-        print("[alpha] ALPHAVANTAGE_API_KEY not set")
-        return None
-
-    base = "https://www.alphavantage.co/query"
-    params = {
-        "function": "TIME_SERIES_DAILY_ADJUSTED",
-        "symbol": symbol,
-        "outputsize": outputsize,
-        "apikey": ALPHAVANTAGE_API_KEY
-    }
-
+def _nse_session():
+    s = requests.Session()
+    s.headers.update(_HEADERS)
     try:
-        r = requests.get(base, params=params, timeout=15)
+        s.get(_NSE_BASE, timeout=10)
+    except Exception:
+        pass
+    return s
+
+def _fetch_json(path: str, params: dict = None) -> Optional[dict]:
+    s = _nse_session()
+    url = _NSE_BASE + path
+    try:
+        r = s.get(url, params=params or {}, timeout=12)
         r.raise_for_status()
-        data = r.json()
-
-        ts_key = None
-        # find the time series key
-        for k in data.keys():
-            if "Time Series" in k:
-                ts_key = k
-                break
-
-        if ts_key is None or ts_key not in data:
-            print(f"[alpha] No time series returned for {symbol} - response keys: {list(data.keys())[:5]}")
-            return None
-
-        series = data[ts_key]
-        df = pd.DataFrame.from_dict(series, orient='index').rename(columns={
-            '1. open': 'Open',
-            '2. high': 'High',
-            '3. low': 'Low',
-            '4. close': 'Close',
-            '5. adjusted close': 'Adj Close',
-            '6. volume': 'Volume'
-        })[['Open','High','Low','Close','Volume']]
-
-        # convert types and index
-        df.index = pd.to_datetime(df.index)
-        df = df.sort_index()  # ascending
-        df = df.astype({
-            'Open': float, 'High': float, 'Low': float, 'Close': float, 'Volume': float
-        })
-
-        return df
-
+        return r.json()
     except Exception as e:
-        print(f"[alpha] Exception fetching {symbol}: {e}")
+        print(f"[nse_fetch] {path} error: {e}")
         return None
 
+def _nse_quote(symbol: str) -> Optional[dict]:
+    symbol_clean = symbol.replace('.NS', '').upper()
+    return _fetch_json(f"/api/quote-equity?symbol={symbol_clean}")
 
-class StockPredictor:
-    """
-    Stock prediction engine using Random Forest and technical indicators.
-    (Uses Alpha Vantage as data source.)
-    """
+def _nse_historical(symbol: str, from_date: str, to_date: str) -> Optional[pd.DataFrame]:
+    symbol_clean = symbol.replace('.NS', '').upper()
+    path = f"/api/historical/cm/equity?symbol={symbol_clean}&series=[%22EQ%22]&from={from_date}&to={to_date}"
+    resp = _fetch_json(path)
+    if not resp or 'data' not in resp:
+        return None
+    rows = resp['data']
+    df = pd.DataFrame(rows)
+    # normalize date column
+    date_col = None
+    for cand in ('CH_TIMESTAMP', 'TIMESTAMP', 'DATE'):
+        if cand in df.columns:
+            date_col = cand
+            break
+    if date_col is None:
+        return None
+    df.rename(columns={date_col: 'date', 'OPEN': 'Open', 'HIGH': 'High', 'LOW': 'Low', 'CLOSE': 'Close', 'TOTTRDQTY': 'Volume'}, inplace=True)
+    df['date'] = pd.to_datetime(df['date'], dayfirst=True, errors='coerce')
+    df = df.dropna(subset=['date'])
+    df.set_index('date', inplace=True)
+    for col in ['Open','High','Low','Close','Volume']:
+        df[col] = pd.to_numeric(df.get(col, np.nan), errors='coerce')
+    df = df[['Open','High','Low','Close','Volume']].sort_index()
+    df = df.dropna()
+    return df if not df.empty else None
+
+class MarketAnalyzer:
+    NIFTY_50_STOCKS = [
+        'RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK',
+        'HINDUNILVR', 'ITC', 'SBIN', 'BHARTIARTL', 'KOTAKBANK',
+        'LT', 'AXISBANK', 'ASIANPAINT', 'MARUTI', 'SUNPHARMA',
+        'TITAN', 'ULTRACEMCO', 'BAJFINANCE', 'NESTLEIND', 'WIPRO',
+        'ONGC', 'NTPC', 'POWERGRID', 'M&M', 'TECHM',
+        'TATAMOTORS', 'HCLTECH', 'ADANIPORTS', 'COALINDIA', 'TATASTEEL'
+    ]
+
     def __init__(self):
-        self.model = None
-        self.feature_names = []
-        # simple in-process cache to respect rate limits
-        self._cache = {}
-        self._cache_ttl = timedelta(seconds=60)  # 1 minute cache default
+        self.cache = {}
+        self.cache_duration = timedelta(minutes=5)
 
     def normalize_ticker(self, ticker: str) -> str:
-        ticker = ticker.strip().upper()
-        # Alpha Vantage uses exchange suffix for Indian stocks: e.g. RELIANCE.NS
-        if not ticker.endswith('.NS') and not ticker.endswith('.BO'):
-            ticker = f"{ticker}.NS"
-        return ticker
+        t = ticker.strip().upper()
+        if not t.endswith('.NS') and not t.endswith('.BO'):
+            t = f"{t}.NS"
+        return t
 
-    def fetch_data(self, ticker: str, period: str = "2y") -> Optional[pd.DataFrame]:
-        """
-        Fetch historical stock data from Alpha Vantage.
-        Accepts period strings similar to before. '2y' -> outputsize='full' and slice.
-        """
-        ticker = self.normalize_ticker(ticker)
-        now = datetime.now()
+    def get_stock_data(self, ticker: str, period: str = "1d") -> Optional[pd.DataFrame]:
+        cache_key = f"nse_{ticker}_{period}"
+        now = datetime.utcnow()
+        cached = self.cache.get(cache_key)
+        if cached and now - cached[0] < self.cache_duration:
+            return cached[1].copy()
 
-        cache_key = f"av_{ticker}"
-        cached = self._cache.get(cache_key)
-        if cached:
-            ts, df = cached
-            if now - ts < self._cache_ttl:
-                return df.copy()
+        # build dates similar to predictor (period in dd-mm-yyyy)
+        to_dt = datetime.now()
+        if period.endswith('y'):
+            years = int(period[:-1]); from_dt = to_dt - timedelta(days=365 * years)
+        elif period.endswith('mo'):
+            months = int(period[:-2]); from_dt = to_dt - timedelta(days=30 * months)
+        elif period.endswith('d'):
+            days = int(period[:-1]); from_dt = to_dt - timedelta(days=days)
+        else:
+            from_dt = to_dt - timedelta(days=30)
 
-        outputsize = "full" if period in ("2y", "5y", "full") else "compact"
-        df = _alpha_vantage_history(ticker, outputsize=outputsize)
-        if df is None or df.empty:
+        from_str = from_dt.strftime("%d-%m-%Y")
+        to_str = to_dt.strftime("%d-%m-%Y")
+
+        df = _nse_historical(ticker, from_str, to_str)
+        if df is None:
             return None
-
-        # Trim rows based on period requested (approximate)
-        try:
-            if period.endswith('y'):
-                years = int(period[:-1])
-                cutoff = now - timedelta(days=365 * years)
-                df = df[df.index >= cutoff]
-            elif period.endswith('mo'):
-                months = int(period[:-2])
-                cutoff = now - timedelta(days=30 * months)
-                df = df[df.index >= cutoff]
-            elif period.endswith('d'):
-                days = int(period[:-1])
-                cutoff = now - timedelta(days=days)
-                df = df[df.index >= cutoff]
-            # otherwise leave full
-        except Exception:
-            pass
-
-        if len(df) < 30:
-            # not enough data for predictor pipeline
-            return None
-
-        self._cache[cache_key] = (now, df.copy())
+        self.cache[cache_key] = (now, df.copy())
         return df
 
-    def calculate_rsi(self, data: pd.Series, period: int = 14) -> pd.Series:
-        delta = data.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-        rs = gain / loss.replace(0, np.nan)
-        rsi = 100 - (100 / (1 + rs))
-        return rsi.fillna(50)
+    def get_top_gainers(self, stocks: List[str] = None, limit: int = 10) -> List[Dict]:
+        # Try direct NSE API for live gainers first
+        resp = _fetch_json("/api/live-analysis-variations?index=gainers")
+        results = []
+        if resp and isinstance(resp, dict) and 'data' in resp:
+            for item in resp['data'][:limit]:
+                try:
+                    results.append({
+                        'ticker': item.get('symbol'),
+                        'ticker_ns': self.normalize_ticker(item.get('symbol', '')),
+                        'current_price': float(item.get('lastPrice', 0)),
+                        'previous_close': float(item.get('previousClose', 0)),
+                        'change': round(float(item.get('lastPrice', 0)) - float(item.get('previousClose', 0)), 2),
+                        'change_percent': round(float(item.get('pChange', 0)), 2),
+                        'volume': int(item.get('tradedQuantity', 0)),
+                        'high': float(item.get('dayHigh', 0)),
+                        'low': float(item.get('dayLow', 0))
+                    })
+                except Exception:
+                    continue
+            return results[:limit]
 
-    def generate_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        data = df.copy()
-        data['sma_5'] = data['Close'].rolling(window=5).mean()
-        data['sma_10'] = data['Close'].rolling(window=10).mean()
-        data['ema_10'] = data['Close'].ewm(span=10, adjust=False).mean()
-        data['rsi_14'] = self.calculate_rsi(data['Close'], 14)
-        data['volume_change'] = data['Volume'].pct_change()
-        data['return_1d'] = data['Close'].pct_change(1)
-        data['return_2d'] = data['Close'].pct_change(2)
-        data['return_3d'] = data['Close'].pct_change(3)
-        data['momentum_5'] = data['Close'] - data['Close'].shift(5)
-        data['volatility_10'] = data['Close'].rolling(window=10).std()
-        data['target'] = data['Close'].shift(-1)
-        data = data.dropna()
-        data = data.replace([np.inf, -np.inf], np.nan).dropna()
+        # fallback: compute from provided stocks list
+        if stocks is None:
+            stocks = self.NIFTY_50_STOCKS
+        temp = []
+        for t in stocks:
+            df = self.get_stock_data(t, period="5d")
+            if df is not None and len(df) >= 2:
+                try:
+                    current = float(df['Close'].iloc[-1]); prev = float(df['Close'].iloc[-2])
+                    change = current - prev
+                    change_pct = (change / prev) * 100 if prev != 0 else 0
+                    temp.append({'ticker': t, 'ticker_ns': self.normalize_ticker(t), 'current_price': round(current,2),
+                                 'previous_close': round(prev,2), 'change': round(change,2),
+                                 'change_percent': round(change_pct,2), 'volume': int(df['Volume'].iloc[-1]),
+                                 'high': round(float(df['High'].iloc[-1]),2), 'low': round(float(df['Low'].iloc[-1]),2)})
+                except Exception:
+                    continue
+        temp.sort(key=lambda x: x['change_percent'], reverse=True)
+        return temp[:limit]
 
-        feature_cols = [
-            'sma_5', 'sma_10', 'ema_10', 'rsi_14', 'volume_change',
-            'return_1d', 'return_2d', 'return_3d', 'momentum_5', 'volatility_10'
-        ]
-        for col in feature_cols:
-            if col in data.columns:
-                if 'return' in col or 'volume_change' in col:
-                    data[col] = data[col].clip(-1, 1)
-                elif col == 'rsi_14':
-                    data[col] = data[col].clip(0, 100)
-        return data
+    def get_top_losers(self, stocks: List[str] = None, limit: int = 10) -> List[Dict]:
+        resp = _fetch_json("/api/live-analysis-variations?index=loosers")
+        results = []
+        if resp and isinstance(resp, dict) and 'data' in resp:
+            for item in resp['data'][:limit]:
+                try:
+                    results.append({
+                        'ticker': item.get('symbol'),
+                        'ticker_ns': self.normalize_ticker(item.get('symbol', '')),
+                        'current_price': float(item.get('lastPrice', 0)),
+                        'previous_close': float(item.get('previousClose', 0)),
+                        'change': round(float(item.get('lastPrice', 0)) - float(item.get('previousClose', 0)), 2),
+                        'change_percent': round(float(item.get('pChange', 0)), 2),
+                        'volume': int(item.get('tradedQuantity', 0)),
+                        'high': float(item.get('dayHigh', 0)),
+                        'low': float(item.get('dayLow', 0))
+                    })
+                except Exception:
+                    continue
+            return results[:limit]
 
-    def train_model(self, X: pd.DataFrame, y: pd.Series) -> Tuple[float, float]:
-        if X.isnull().any().any():
-            raise ValueError("Training data contains NaN values")
-        if np.isinf(X.values).any():
-            raise ValueError("Training data contains infinite values")
-        if y.isnull().any():
-            raise ValueError("Target data contains NaN values")
-        if np.isinf(y.values).any():
-            raise ValueError("Target data contains infinite values")
+        if stocks is None:
+            stocks = self.NIFTY_50_STOCKS
+        temp = []
+        for t in stocks:
+            df = self.get_stock_data(t, period="5d")
+            if df is not None and len(df) >= 2:
+                try:
+                    current = float(df['Close'].iloc[-1]); prev = float(df['Close'].iloc[-2])
+                    change = current - prev
+                    change_pct = (change / prev) * 100 if prev != 0 else 0
+                    temp.append({'ticker': t, 'ticker_ns': self.normalize_ticker(t), 'current_price': round(current,2),
+                                 'previous_close': round(prev,2), 'change': round(change,2),
+                                 'change_percent': round(change_pct,2), 'volume': int(df['Volume'].iloc[-1]),
+                                 'high': round(float(df['High'].iloc[-1]),2), 'low': round(float(df['Low'].iloc[-1]),2)})
+                except Exception:
+                    continue
+        temp.sort(key=lambda x: x['change_percent'])
+        return temp[:limit]
 
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, shuffle=False
-        )
+    def get_market_overview(self) -> Dict:
+        """
+        Returns a market overview (advancing, declining, unchanged, advance_decline_ratio, sentiment, total_volume)
+        """
+        resp = _fetch_json("/api/marketStatus")
+        if resp and isinstance(resp, dict):
+            try:
+                # Some endpoints provide marketStatus structure; fallbacks for robustness
+                advancing = resp.get('advanceDecline', {}).get('advances', 0) or 0
+                declining = resp.get('advanceDecline', {}).get('declines', 0) or 0
+                unchanged = resp.get('advanceDecline', {}).get('unchanged', 0) or 0
+                total_volume = resp.get('totalVolume', 0) or 0
+                a_d_ratio = (advancing / declining) if declining else None
+                sentiment = "Neutral"
+                if a_d_ratio is not None:
+                    if a_d_ratio > 1.05:
+                        sentiment = "Bullish"
+                    elif a_d_ratio < 0.95:
+                        sentiment = "Bearish"
+                return {
+                    "advancing": int(advancing),
+                    "declining": int(declining),
+                    "unchanged": int(unchanged),
+                    "advance_decline_ratio": round(a_d_ratio, 2) if a_d_ratio is not None else None,
+                    "market_sentiment": sentiment,
+                    "total_volume": int(total_volume),
+                    "stocks_analyzed": len(self.NIFTY_50_STOCKS),
+                    "timestamp": datetime.now().isoformat()
+                }
+            except Exception:
+                pass
 
-        self.model = RandomForestRegressor(
-            n_estimators=100,
-            max_depth=10,
-            min_samples_split=5,
-            min_samples_leaf=2,
-            random_state=42,
-            n_jobs=-1
-        )
-
-        self.model.fit(X_train, y_train)
-        y_pred = self.model.predict(X_test)
-        mse = mean_squared_error(y_test, y_pred)
-        actual_direction = np.sign(y_test.values - X_test['sma_10'].values)
-        predicted_direction = np.sign(y_pred - X_test['sma_10'].values)
-        direction_accuracy = np.mean(actual_direction == predicted_direction)
-        return mse, direction_accuracy
-
-    def get_feature_importance(self, feature_names: list) -> Dict[str, float]:
-        if self.model is None:
-            return {}
-        importance = self.model.feature_importances_
-        importance_dict = dict(zip(feature_names, importance.tolist()))
-        importance_dict = dict(sorted(importance_dict.items(), key=lambda x: x[1], reverse=True))
-        importance_dict = {k: round(v, 4) for k, v in importance_dict.items()}
-        return importance_dict
-
-    def generate_signals(self, last_close: float, predicted_close: float) -> Dict[str, any]:
-        predicted_return = ((predicted_close - last_close) / last_close) * 100
-        if predicted_return >= 2.0:
-            signal = "BUY"
-            entry_price = last_close
-            target_price = predicted_close
-            stop_loss = last_close * 0.97
-        elif predicted_return <= -2.0:
-            signal = "SELL"
-            entry_price = last_close
-            target_price = predicted_close
-            stop_loss = last_close * 1.03
-        else:
-            signal = "HOLD"
-            entry_price = last_close
-            target_price = last_close
-            stop_loss = last_close * 0.98
+        # Fallback compute from NIFTY_50 list (slow)
+        adv = dec = unc = 0
+        total_vol = 0
+        for t in self.NIFTY_50_STOCKS:
+            df = self.get_stock_data(t, period="1d")
+            if df is None or len(df) < 2:
+                continue
+            try:
+                prev = df['Close'].iloc[-2]; cur = df['Close'].iloc[-1]
+                if cur > prev: adv += 1
+                elif cur < prev: dec += 1
+                else: unc += 1
+                total_vol += int(df['Volume'].iloc[-1])
+            except Exception:
+                continue
+        a_d_ratio = (adv / dec) if dec else None
+        sentiment = "Neutral"
+        if a_d_ratio is not None:
+            if a_d_ratio > 1.05:
+                sentiment = "Bullish"
+            elif a_d_ratio < 0.95:
+                sentiment = "Bearish"
         return {
-            "signal": signal,
-            "predicted_return_pct": round(predicted_return, 2),
-            "entry_price": round(entry_price, 2),
-            "target_price": round(target_price, 2),
-            "stop_loss": round(stop_loss, 2)
+            "advancing": adv, "declining": dec, "unchanged": unc,
+            "advance_decline_ratio": round(a_d_ratio,2) if a_d_ratio is not None else None,
+            "market_sentiment": sentiment,
+            "total_volume": total_vol,
+            "stocks_analyzed": len(self.NIFTY_50_STOCKS),
+            "timestamp": datetime.now().isoformat()
         }
 
-    def predict(self, ticker: str) -> Optional[Dict]:
+    def get_stock_analysis(self, ticker: str, period: str = "1y") -> Optional[Dict]:
+        df = self.get_stock_data(ticker, period=period)
+        if df is None or df.empty:
+            return None
         try:
-            period = "2y"
-            ticker = self.normalize_ticker(ticker)
-            print(f"Fetching data for: {ticker}")
-            df = self.fetch_data(ticker, period)
-            if df is None or df.empty:
-                print(f"[predictor] No data for {ticker}")
-                return None
+            ticker_ns = self.normalize_ticker(ticker)
+            current_price = float(df['Close'].iloc[-1])
+            high_52w = float(df['High'].max())
+            low_52w = float(df['Low'].min())
+            avg_volume = int(df['Volume'].mean())
 
-            data = self.generate_features(df)
-            if data.empty or 'target' not in data.columns:
-                return None
+            df['sma_20'] = df['Close'].rolling(window=20).mean()
+            df['sma_50'] = df['Close'].rolling(window=50).mean()
+            df['sma_200'] = df['Close'].rolling(window=200).mean()
 
-            feature_cols = [
-                'sma_5', 'sma_10', 'ema_10', 'rsi_14', 'volume_change',
-                'return_1d', 'return_2d', 'return_3d', 'momentum_5', 'volatility_10'
-            ]
-            X = data[feature_cols]
-            y = data['target']
+            sma_20 = float(df['sma_20'].iloc[-1]) if not pd.isna(df['sma_20'].iloc[-1]) else None
+            sma_50 = float(df['sma_50'].iloc[-1]) if not pd.isna(df['sma_50'].iloc[-1]) else None
+            sma_200 = float(df['sma_200'].iloc[-1]) if not pd.isna(df['sma_200'].iloc[-1]) else None
 
-            mse, direction_accuracy = self.train_model(X, y)
+            delta = df['Close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss.replace(0, np.nan)
+            rsi = 100 - (100 / (1 + rs))
+            current_rsi = float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else 50
 
-            # Predict using last available row
-            last_row = X.iloc[-1:]
-            predicted_close = float(self.model.predict(last_row)[0])
-            last_close = float(df['Close'].iloc[-1])
+            exp1 = df['Close'].ewm(span=12, adjust=False).mean()
+            exp2 = df['Close'].ewm(span=26, adjust=False).mean()
+            macd = exp1 - exp2
+            signal = macd.ewm(span=9, adjust=False).mean()
+            macd_histogram = macd - signal
 
-            signals = self.generate_signals(last_close, predicted_close)
-            feature_importance = self.get_feature_importance(feature_cols)
+            current_macd = float(macd.iloc[-1]) if not pd.isna(macd.iloc[-1]) else 0
+            current_signal = float(signal.iloc[-1]) if not pd.isna(signal.iloc[-1]) else 0
+            current_histogram = float(macd_histogram.iloc[-1]) if not pd.isna(macd_histogram.iloc[-1]) else 0
+
+            bb_period = 20
+            bb_std = 2
+            df['bb_middle'] = df['Close'].rolling(window=bb_period).mean()
+            bb_std_dev = df['Close'].rolling(window=bb_period).std()
+            df['bb_upper'] = df['bb_middle'] + (bb_std_dev * bb_std)
+            df['bb_lower'] = df['bb_middle'] - (bb_std_dev * bb_std)
+
+            bb_upper = float(df['bb_upper'].iloc[-1]) if not pd.isna(df['bb_upper'].iloc[-1]) else None
+            bb_lower = float(df['bb_lower'].iloc[-1]) if not pd.isna(df['bb_lower'].iloc[-1]) else None
+
+            volatility = float(df['Close'].pct_change().rolling(window=30).std().iloc[-1]) if not pd.isna(df['Close'].pct_change().rolling(window=30).std().iloc[-1]) else 0
+
+            trend = "Neutral"
+            if sma_50 and current_price > sma_50:
+                trend = "Up"
+            elif sma_50 and current_price < sma_50:
+                trend = "Down"
+
+            technical_signals = {
+                'rsi': round(current_rsi, 2),
+                'macd': round(current_macd, 4),
+                'macd_signal': round(current_signal, 4),
+                'macd_histogram': round(current_histogram, 4)
+            }
 
             return {
-                "ticker": ticker,
-                "last_close": round(last_close, 2),
-                "predicted_close": round(predicted_close, 2),
-                "predicted_return_pct": round(signals['predicted_return_pct'], 2),
-                "signal": signals['signal'],
-                "entry_price": signals['entry_price'],
-                "target_price": signals['target_price'],
-                "stop_loss": signals['stop_loss'],
-                "model_mse": round(mse, 4),
-                "direction_accuracy": round(direction_accuracy * 100, 2),
-                "feature_importance": feature_importance
+                "ticker": ticker_ns,
+                "current_price": round(current_price, 2),
+                "price_stats": {
+                    "52w_high": round(high_52w, 2),
+                    "52w_low": round(low_52w, 2),
+                    "avg_volume": avg_volume
+                },
+                "volume": {"average": avg_volume},
+                "moving_averages": {"sma_20": sma_20, "sma_50": sma_50, "sma_200": sma_200},
+                "indicators": {"rsi": current_rsi, "macd_trend": "Bullish" if current_macd > current_signal else "Bearish"},
+                "bollinger_bands": {"upper": bb_upper, "lower": bb_lower},
+                "support_resistance": {},
+                "volatility": volatility,
+                "performance": {},
+                "trend": {"direction": trend},
+                "technical_signals": technical_signals,
+                "current_price_timestamp": df.index[-1].isoformat()
             }
         except Exception as e:
-            print(f"[predictor] Prediction error for {ticker}: {e}")
+            print(f"[market_analyzer] Error analyzing {ticker}: {e}")
             return None

@@ -471,63 +471,74 @@
 
 
 # market_analyzer.py
-import os
 import requests
 import pandas as pd
 import numpy as np
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 import warnings
+import time
 
 warnings.filterwarnings('ignore')
 
-ALPHAVANTAGE_API_KEY = os.getenv("ALPHAVANTAGE_API_KEY")
+_NSE_BASE = "https://www.nseindia.com"
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64)",
+    "Accept": "application/json, text/plain, */*",
+    "Referer": "https://www.nseindia.com"
+}
 
-def _alpha_vantage_history(symbol: str, outputsize: str = "compact") -> Optional[pd.DataFrame]:
-    if not ALPHAVANTAGE_API_KEY:
-        print("[alpha] ALPHAVANTAGE_API_KEY not set")
-        return None
-    base = "https://www.alphavantage.co/query"
-    params = {
-        "function": "TIME_SERIES_DAILY_ADJUSTED",
-        "symbol": symbol,
-        "outputsize": outputsize,
-        "apikey": ALPHAVANTAGE_API_KEY
-    }
+def _nse_session():
+    s = requests.Session()
+    s.headers.update(_HEADERS)
     try:
-        r = requests.get(base, params=params, timeout=15)
+        s.get(_NSE_BASE, timeout=10)
+    except Exception:
+        pass
+    return s
+
+def _fetch_json(path: str, params: dict = None) -> Optional[dict]:
+    s = _nse_session()
+    url = _NSE_BASE + path
+    try:
+        r = s.get(url, params=params or {}, timeout=12)
         r.raise_for_status()
-        data = r.json()
-        ts_key = None
-        for k in data.keys():
-            if "Time Series" in k:
-                ts_key = k
-                break
-        if ts_key is None or ts_key not in data:
-            print(f"[alpha] No time series for {symbol}")
-            return None
-        series = data[ts_key]
-        df = pd.DataFrame.from_dict(series, orient='index').rename(columns={
-            '1. open': 'Open',
-            '2. high': 'High',
-            '3. low': 'Low',
-            '4. close': 'Close',
-            '5. adjusted close': 'Adj Close',
-            '6. volume': 'Volume'
-        })[['Open','High','Low','Close','Volume']]
-        df.index = pd.to_datetime(df.index)
-        df = df.sort_index()
-        df = df.astype({'Open': float, 'High': float, 'Low': float, 'Close': float, 'Volume': float})
-        return df
+        return r.json()
     except Exception as e:
-        print(f"[alpha] Exception fetching {symbol}: {e}")
+        print(f"[nse_fetch] {path} error: {e}")
         return None
 
+def _nse_quote(symbol: str) -> Optional[dict]:
+    symbol_clean = symbol.replace('.NS', '').upper()
+    return _fetch_json(f"/api/quote-equity?symbol={symbol_clean}")
+
+def _nse_historical(symbol: str, from_date: str, to_date: str) -> Optional[pd.DataFrame]:
+    symbol_clean = symbol.replace('.NS', '').upper()
+    path = f"/api/historical/cm/equity?symbol={symbol_clean}&series=[%22EQ%22]&from={from_date}&to={to_date}"
+    resp = _fetch_json(path)
+    if not resp or 'data' not in resp:
+        return None
+    rows = resp['data']
+    df = pd.DataFrame(rows)
+    # normalize date column
+    date_col = None
+    for cand in ('CH_TIMESTAMP', 'TIMESTAMP', 'DATE'):
+        if cand in df.columns:
+            date_col = cand
+            break
+    if date_col is None:
+        return None
+    df.rename(columns={date_col: 'date', 'OPEN': 'Open', 'HIGH': 'High', 'LOW': 'Low', 'CLOSE': 'Close', 'TOTTRDQTY': 'Volume'}, inplace=True)
+    df['date'] = pd.to_datetime(df['date'], dayfirst=True, errors='coerce')
+    df = df.dropna(subset=['date'])
+    df.set_index('date', inplace=True)
+    for col in ['Open','High','Low','Close','Volume']:
+        df[col] = pd.to_numeric(df.get(col, np.nan), errors='coerce')
+    df = df[['Open','High','Low','Close','Volume']].sort_index()
+    df = df.dropna()
+    return df if not df.empty else None
 
 class MarketAnalyzer:
-    """
-    Advanced market analysis engine for NSE stocks using Alpha Vantage.
-    """
     NIFTY_50_STOCKS = [
         'RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK',
         'HINDUNILVR', 'ITC', 'SBIN', 'BHARTIARTL', 'KOTAKBANK',
@@ -542,188 +553,6 @@ class MarketAnalyzer:
         self.cache_duration = timedelta(minutes=5)
 
     def normalize_ticker(self, ticker: str) -> str:
-        ticker = ticker.strip().upper()
-        if not ticker.endswith('.NS') and not ticker.endswith('.BO'):
-            ticker = f"{ticker}.NS"
-        return ticker
-
-    def get_stock_data(self, ticker: str, period: str = "1d") -> Optional[pd.DataFrame]:
-        cache_key = f"{ticker}_{period}"
-        if cache_key in self.cache:
-            cached_time, cached_data = self.cache[cache_key]
-            if datetime.now() - cached_time < self.cache_duration:
-                return cached_data.copy()
-
-        ticker_ns = self.normalize_ticker(ticker)
-        # Map small period strings to alpha outputsize
-        outputsize = "compact" if period in ("1d","5d","1mo","3mo") else "full"
-        df = _alpha_vantage_history(ticker_ns, outputsize=outputsize)
-        if df is None or df.empty:
-            return None
-
-        # trim according to requested period
-        now = datetime.now()
-        try:
-            if period.endswith('y'):
-                years = int(period[:-1])
-                cutoff = now - timedelta(days=365 * years)
-                df = df[df.index >= cutoff]
-            elif period.endswith('mo'):
-                months = int(period[:-2])
-                cutoff = now - timedelta(days=30 * months)
-                df = df[df.index >= cutoff]
-            elif period.endswith('d'):
-                days = int(period[:-1])
-                cutoff = now - timedelta(days=days)
-                df = df[df.index >= cutoff]
-        except Exception:
-            pass
-
-        if df.empty:
-            return None
-
-        self.cache[cache_key] = (datetime.now(), df.copy())
-        return df
-
-    def get_top_gainers(self, stocks: List[str] = None, limit: int = 10) -> List[Dict]:
-        if stocks is None:
-            stocks = self.NIFTY_50_STOCKS
-        gainers = []
-        for ticker in stocks:
-            df = self.get_stock_data(ticker, period="5d")
-            if df is not None and len(df) >= 2:
-                try:
-                    current_price = df['Close'].iloc[-1]
-                    prev_close = df['Close'].iloc[-2]
-                    change = current_price - prev_close
-                    change_pct = (change / prev_close) * 100
-                    gainers.append({
-                        'ticker': ticker,
-                        'ticker_ns': self.normalize_ticker(ticker),
-                        'current_price': round(float(current_price), 2),
-                        'previous_close': round(float(prev_close), 2),
-                        'change': round(float(change), 2),
-                        'change_percent': round(float(change_pct), 2),
-                        'volume': int(df['Volume'].iloc[-1]),
-                        'high': round(float(df['High'].iloc[-1]), 2),
-                        'low': round(float(df['Low'].iloc[-1]), 2)
-                    })
-                except Exception as e:
-                    print(f"Error processing {ticker}: {e}")
-                    continue
-        gainers.sort(key=lambda x: x['change_percent'], reverse=True)
-        return gainers[:limit]
-
-    def get_top_losers(self, stocks: List[str] = None, limit: int = 10) -> List[Dict]:
-        if stocks is None:
-            stocks = self.NIFTY_50_STOCKS
-        losers = []
-        for ticker in stocks:
-            df = self.get_stock_data(ticker, period="5d")
-            if df is not None and len(df) >= 2:
-                try:
-                    current_price = df['Close'].iloc[-1]
-                    prev_close = df['Close'].iloc[-2]
-                    change = current_price - prev_close
-                    change_pct = (change / prev_close) * 100
-                    losers.append({
-                        'ticker': ticker,
-                        'ticker_ns': self.normalize_ticker(ticker),
-                        'current_price': round(float(current_price), 2),
-                        'previous_close': round(float(prev_close), 2),
-                        'change': round(float(change), 2),
-                        'change_percent': round(float(change_pct), 2),
-                        'volume': int(df['Volume'].iloc[-1]),
-                        'high': round(float(df['High'].iloc[-1]), 2),
-                        'low': round(float(df['Low'].iloc[-1]), 2)
-                    })
-                except Exception as e:
-                    print(f"Error processing {ticker}: {e}")
-                    continue
-        losers.sort(key=lambda x: x['change_percent'])
-        return losers[:limit]
-
-    def get_stock_analysis(self, ticker: str, period: str = "1y") -> Optional[Dict]:
-        df = self.get_stock_data(ticker, period=period)
-        if df is None or df.empty:
-            return None
-        try:
-            ticker_ns = self.normalize_ticker(ticker)
-            current_price = float(df['Close'].iloc[-1])
-            high_52w = float(df['High'].max())
-            low_52w = float(df['Low'].min())
-            avg_volume = int(df['Volume'].mean())
-
-            df['sma_20'] = df['Close'].rolling(window=20).mean()
-            df['sma_50'] = df['Close'].rolling(window=50).mean()
-            df['sma_200'] = df['Close'].rolling(window=200).mean()
-
-            sma_20 = float(df['sma_20'].iloc[-1]) if not pd.isna(df['sma_20'].iloc[-1]) else None
-            sma_50 = float(df['sma_50'].iloc[-1]) if not pd.isna(df['sma_50'].iloc[-1]) else None
-            sma_200 = float(df['sma_200'].iloc[-1]) if not pd.isna(df['sma_200'].iloc[-1]) else None
-
-            delta = df['Close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            rs = gain / loss.replace(0, np.nan)
-            rsi = 100 - (100 / (1 + rs))
-            current_rsi = float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else 50
-
-            exp1 = df['Close'].ewm(span=12, adjust=False).mean()
-            exp2 = df['Close'].ewm(span=26, adjust=False).mean()
-            macd = exp1 - exp2
-            signal = macd.ewm(span=9, adjust=False).mean()
-            macd_histogram = macd - signal
-
-            current_macd = float(macd.iloc[-1]) if not pd.isna(macd.iloc[-1]) else 0
-            current_signal = float(signal.iloc[-1]) if not pd.isna(signal.iloc[-1]) else 0
-            current_histogram = float(macd_histogram.iloc[-1]) if not pd.isna(macd_histogram.iloc[-1]) else 0
-
-            bb_period = 20
-            bb_std = 2
-            df['bb_middle'] = df['Close'].rolling(window=bb_period).mean()
-            bb_std_dev = df['Close'].rolling(window=bb_period).std()
-            df['bb_upper'] = df['bb_middle'] + (bb_std_dev * bb_std)
-            df['bb_lower'] = df['bb_middle'] - (bb_std_dev * bb_std)
-
-            bb_upper = float(df['bb_upper'].iloc[-1]) if not pd.isna(df['bb_upper'].iloc[-1]) else None
-            bb_lower = float(df['bb_lower'].iloc[-1]) if not pd.isna(df['bb_lower'].iloc[-1]) else None
-
-            volatility = float(df['Close'].pct_change().rolling(window=30).std().iloc[-1]) if not pd.isna(df['Close'].pct_change().rolling(window=30).std().iloc[-1]) else 0
-
-            trend = "Neutral"
-            if current_price > (sma_50 or 0):
-                trend = "Up"
-            elif current_price < (sma_50 or 0):
-                trend = "Down"
-
-            technical_signals = {
-                'rsi': round(current_rsi, 2),
-                'macd': round(current_macd, 4),
-                'macd_signal': round(current_signal, 4),
-                'macd_histogram': round(current_histogram, 4)
-            }
-
-            return {
-                "ticker": ticker_ns,
-                "current_price": round(current_price, 2),
-                "price_stats": {
-                    "52w_high": round(high_52w, 2),
-                    "52w_low": round(low_52w, 2),
-                    "avg_volume": avg_volume
-                },
-                "volume": {"average": avg_volume},
-                "moving_averages": {"sma_20": sma_20, "sma_50": sma_50, "sma_200": sma_200},
-                "indicators": {"rsi": current_rsi, "macd_trend": "Bullish" if current_macd > current_signal else "Bearish"},
-                "bollinger_bands": {"upper": bb_upper, "lower": bb_lower},
-                "support_resistance": {},
-                "volatility": volatility,
-                "performance": {},
-                "trend": {"direction": trend},
-                "technical_signals": technical_signals,
-                "current_price_timestamp": df.index[-1].isoformat()
-            }
-
-        except Exception as e:
-            print(f"[market_analyzer] Error analyzing {ticker}: {e}")
-            return None
+        t = ticker.strip().upper()
+        if not t.endswith('.NS') and not t.endswith('.BO'):
+            t = f"{t}.NS"
