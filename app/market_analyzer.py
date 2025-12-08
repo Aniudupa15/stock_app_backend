@@ -556,3 +556,260 @@ class MarketAnalyzer:
         t = ticker.strip().upper()
         if not t.endswith('.NS') and not t.endswith('.BO'):
             t = f"{t}.NS"
+        return t
+
+    def get_stock_data(self, ticker: str, period: str = "1d") -> Optional[pd.DataFrame]:
+        cache_key = f"nse_{ticker}_{period}"
+        now = datetime.utcnow()
+        cached = self.cache.get(cache_key)
+        if cached and now - cached[0] < self.cache_duration:
+            return cached[1].copy()
+
+        # build dates similar to predictor (period in dd-mm-yyyy)
+        to_dt = datetime.now()
+        if period.endswith('y'):
+            years = int(period[:-1]); from_dt = to_dt - timedelta(days=365 * years)
+        elif period.endswith('mo'):
+            months = int(period[:-2]); from_dt = to_dt - timedelta(days=30 * months)
+        elif period.endswith('d'):
+            days = int(period[:-1]); from_dt = to_dt - timedelta(days=days)
+        else:
+            from_dt = to_dt - timedelta(days=30)
+
+        from_str = from_dt.strftime("%d-%m-%Y")
+        to_str = to_dt.strftime("%d-%m-%Y")
+
+        df = _nse_historical(ticker, from_str, to_str)
+        if df is None:
+            return None
+        self.cache[cache_key] = (now, df.copy())
+        return df
+
+    def get_top_gainers(self, stocks: List[str] = None, limit: int = 10) -> List[Dict]:
+        # Try direct NSE API for live gainers first
+        resp = _fetch_json("/api/live-analysis-variations?index=gainers")
+        results = []
+        if resp and isinstance(resp, dict) and 'data' in resp:
+            for item in resp['data'][:limit]:
+                try:
+                    results.append({
+                        'ticker': item.get('symbol'),
+                        'ticker_ns': self.normalize_ticker(item.get('symbol', '')),
+                        'current_price': float(item.get('lastPrice', 0)),
+                        'previous_close': float(item.get('previousClose', 0)),
+                        'change': round(float(item.get('lastPrice', 0)) - float(item.get('previousClose', 0)), 2),
+                        'change_percent': round(float(item.get('pChange', 0)), 2),
+                        'volume': int(item.get('tradedQuantity', 0)),
+                        'high': float(item.get('dayHigh', 0)),
+                        'low': float(item.get('dayLow', 0))
+                    })
+                except Exception:
+                    continue
+            return results[:limit]
+
+        # fallback: compute from provided stocks list
+        if stocks is None:
+            stocks = self.NIFTY_50_STOCKS
+        temp = []
+        for t in stocks:
+            df = self.get_stock_data(t, period="5d")
+            if df is not None and len(df) >= 2:
+                try:
+                    current = float(df['Close'].iloc[-1]); prev = float(df['Close'].iloc[-2])
+                    change = current - prev
+                    change_pct = (change / prev) * 100 if prev != 0 else 0
+                    temp.append({'ticker': t, 'ticker_ns': self.normalize_ticker(t), 'current_price': round(current,2),
+                                 'previous_close': round(prev,2), 'change': round(change,2),
+                                 'change_percent': round(change_pct,2), 'volume': int(df['Volume'].iloc[-1]),
+                                 'high': round(float(df['High'].iloc[-1]),2), 'low': round(float(df['Low'].iloc[-1]),2)})
+                except Exception:
+                    continue
+        temp.sort(key=lambda x: x['change_percent'], reverse=True)
+        return temp[:limit]
+
+    def get_top_losers(self, stocks: List[str] = None, limit: int = 10) -> List[Dict]:
+        resp = _fetch_json("/api/live-analysis-variations?index=loosers")
+        results = []
+        if resp and isinstance(resp, dict) and 'data' in resp:
+            for item in resp['data'][:limit]:
+                try:
+                    results.append({
+                        'ticker': item.get('symbol'),
+                        'ticker_ns': self.normalize_ticker(item.get('symbol', '')),
+                        'current_price': float(item.get('lastPrice', 0)),
+                        'previous_close': float(item.get('previousClose', 0)),
+                        'change': round(float(item.get('lastPrice', 0)) - float(item.get('previousClose', 0)), 2),
+                        'change_percent': round(float(item.get('pChange', 0)), 2),
+                        'volume': int(item.get('tradedQuantity', 0)),
+                        'high': float(item.get('dayHigh', 0)),
+                        'low': float(item.get('dayLow', 0))
+                    })
+                except Exception:
+                    continue
+            return results[:limit]
+
+        if stocks is None:
+            stocks = self.NIFTY_50_STOCKS
+        temp = []
+        for t in stocks:
+            df = self.get_stock_data(t, period="5d")
+            if df is not None and len(df) >= 2:
+                try:
+                    current = float(df['Close'].iloc[-1]); prev = float(df['Close'].iloc[-2])
+                    change = current - prev
+                    change_pct = (change / prev) * 100 if prev != 0 else 0
+                    temp.append({'ticker': t, 'ticker_ns': self.normalize_ticker(t), 'current_price': round(current,2),
+                                 'previous_close': round(prev,2), 'change': round(change,2),
+                                 'change_percent': round(change_pct,2), 'volume': int(df['Volume'].iloc[-1]),
+                                 'high': round(float(df['High'].iloc[-1]),2), 'low': round(float(df['Low'].iloc[-1]),2)})
+                except Exception:
+                    continue
+        temp.sort(key=lambda x: x['change_percent'])
+        return temp[:limit]
+
+    def get_market_overview(self) -> Dict:
+        """
+        Returns a market overview (advancing, declining, unchanged, advance_decline_ratio, sentiment, total_volume)
+        """
+        resp = _fetch_json("/api/marketStatus")
+        if resp and isinstance(resp, dict):
+            try:
+                # Some endpoints provide marketStatus structure; fallbacks for robustness
+                advancing = resp.get('advanceDecline', {}).get('advances', 0) or 0
+                declining = resp.get('advanceDecline', {}).get('declines', 0) or 0
+                unchanged = resp.get('advanceDecline', {}).get('unchanged', 0) or 0
+                total_volume = resp.get('totalVolume', 0) or 0
+                a_d_ratio = (advancing / declining) if declining else None
+                sentiment = "Neutral"
+                if a_d_ratio is not None:
+                    if a_d_ratio > 1.05:
+                        sentiment = "Bullish"
+                    elif a_d_ratio < 0.95:
+                        sentiment = "Bearish"
+                return {
+                    "advancing": int(advancing),
+                    "declining": int(declining),
+                    "unchanged": int(unchanged),
+                    "advance_decline_ratio": round(a_d_ratio, 2) if a_d_ratio is not None else None,
+                    "market_sentiment": sentiment,
+                    "total_volume": int(total_volume),
+                    "stocks_analyzed": len(self.NIFTY_50_STOCKS),
+                    "timestamp": datetime.now().isoformat()
+                }
+            except Exception:
+                pass
+
+        # Fallback compute from NIFTY_50 list (slow)
+        adv = dec = unc = 0
+        total_vol = 0
+        for t in self.NIFTY_50_STOCKS:
+            df = self.get_stock_data(t, period="1d")
+            if df is None or len(df) < 2:
+                continue
+            try:
+                prev = df['Close'].iloc[-2]; cur = df['Close'].iloc[-1]
+                if cur > prev: adv += 1
+                elif cur < prev: dec += 1
+                else: unc += 1
+                total_vol += int(df['Volume'].iloc[-1])
+            except Exception:
+                continue
+        a_d_ratio = (adv / dec) if dec else None
+        sentiment = "Neutral"
+        if a_d_ratio is not None:
+            if a_d_ratio > 1.05:
+                sentiment = "Bullish"
+            elif a_d_ratio < 0.95:
+                sentiment = "Bearish"
+        return {
+            "advancing": adv, "declining": dec, "unchanged": unc,
+            "advance_decline_ratio": round(a_d_ratio,2) if a_d_ratio is not None else None,
+            "market_sentiment": sentiment,
+            "total_volume": total_vol,
+            "stocks_analyzed": len(self.NIFTY_50_STOCKS),
+            "timestamp": datetime.now().isoformat()
+        }
+
+    def get_stock_analysis(self, ticker: str, period: str = "1y") -> Optional[Dict]:
+        df = self.get_stock_data(ticker, period=period)
+        if df is None or df.empty:
+            return None
+        try:
+            ticker_ns = self.normalize_ticker(ticker)
+            current_price = float(df['Close'].iloc[-1])
+            high_52w = float(df['High'].max())
+            low_52w = float(df['Low'].min())
+            avg_volume = int(df['Volume'].mean())
+
+            df['sma_20'] = df['Close'].rolling(window=20).mean()
+            df['sma_50'] = df['Close'].rolling(window=50).mean()
+            df['sma_200'] = df['Close'].rolling(window=200).mean()
+
+            sma_20 = float(df['sma_20'].iloc[-1]) if not pd.isna(df['sma_20'].iloc[-1]) else None
+            sma_50 = float(df['sma_50'].iloc[-1]) if not pd.isna(df['sma_50'].iloc[-1]) else None
+            sma_200 = float(df['sma_200'].iloc[-1]) if not pd.isna(df['sma_200'].iloc[-1]) else None
+
+            delta = df['Close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss.replace(0, np.nan)
+            rsi = 100 - (100 / (1 + rs))
+            current_rsi = float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else 50
+
+            exp1 = df['Close'].ewm(span=12, adjust=False).mean()
+            exp2 = df['Close'].ewm(span=26, adjust=False).mean()
+            macd = exp1 - exp2
+            signal = macd.ewm(span=9, adjust=False).mean()
+            macd_histogram = macd - signal
+
+            current_macd = float(macd.iloc[-1]) if not pd.isna(macd.iloc[-1]) else 0
+            current_signal = float(signal.iloc[-1]) if not pd.isna(signal.iloc[-1]) else 0
+            current_histogram = float(macd_histogram.iloc[-1]) if not pd.isna(macd_histogram.iloc[-1]) else 0
+
+            bb_period = 20
+            bb_std = 2
+            df['bb_middle'] = df['Close'].rolling(window=bb_period).mean()
+            bb_std_dev = df['Close'].rolling(window=bb_period).std()
+            df['bb_upper'] = df['bb_middle'] + (bb_std_dev * bb_std)
+            df['bb_lower'] = df['bb_middle'] - (bb_std_dev * bb_std)
+
+            bb_upper = float(df['bb_upper'].iloc[-1]) if not pd.isna(df['bb_upper'].iloc[-1]) else None
+            bb_lower = float(df['bb_lower'].iloc[-1]) if not pd.isna(df['bb_lower'].iloc[-1]) else None
+
+            volatility = float(df['Close'].pct_change().rolling(window=30).std().iloc[-1]) if not pd.isna(df['Close'].pct_change().rolling(window=30).std().iloc[-1]) else 0
+
+            trend = "Neutral"
+            if sma_50 and current_price > sma_50:
+                trend = "Up"
+            elif sma_50 and current_price < sma_50:
+                trend = "Down"
+
+            technical_signals = {
+                'rsi': round(current_rsi, 2),
+                'macd': round(current_macd, 4),
+                'macd_signal': round(current_signal, 4),
+                'macd_histogram': round(current_histogram, 4)
+            }
+
+            return {
+                "ticker": ticker_ns,
+                "current_price": round(current_price, 2),
+                "price_stats": {
+                    "52w_high": round(high_52w, 2),
+                    "52w_low": round(low_52w, 2),
+                    "avg_volume": avg_volume
+                },
+                "volume": {"average": avg_volume},
+                "moving_averages": {"sma_20": sma_20, "sma_50": sma_50, "sma_200": sma_200},
+                "indicators": {"rsi": current_rsi, "macd_trend": "Bullish" if current_macd > current_signal else "Bearish"},
+                "bollinger_bands": {"upper": bb_upper, "lower": bb_lower},
+                "support_resistance": {},
+                "volatility": volatility,
+                "performance": {},
+                "trend": {"direction": trend},
+                "technical_signals": technical_signals,
+                "current_price_timestamp": df.index[-1].isoformat()
+            }
+        except Exception as e:
+            print(f"[market_analyzer] Error analyzing {ticker}: {e}")
+            return None
