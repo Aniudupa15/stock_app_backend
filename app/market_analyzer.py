@@ -1,494 +1,17 @@
-# import yfinance as yf
-# import pandas as pd
-# import numpy as np
-# from typing import List, Dict, Optional
-# from datetime import datetime, timedelta
-# import warnings
-# warnings.filterwarnings('ignore')
-
-# class MarketAnalyzer:
-#     """
-#     Advanced market analysis engine for NSE stocks
-#     """
-    
-#     # Popular NSE stocks for market overview
-#     NIFTY_50_STOCKS = [
-#         'RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK',
-#         'HINDUNILVR', 'ITC', 'SBIN', 'BHARTIARTL', 'KOTAKBANK',
-#         'LT', 'AXISBANK', 'ASIANPAINT', 'MARUTI', 'SUNPHARMA',
-#         'TITAN', 'ULTRACEMCO', 'BAJFINANCE', 'NESTLEIND', 'WIPRO',
-#         'ONGC', 'NTPC', 'POWERGRID', 'M&M', 'TECHM',
-#         'TATAMOTORS', 'HCLTECH', 'ADANIPORTS', 'COALINDIA', 'TATASTEEL'
-#     ]
-    
-#     def __init__(self):
-#         self.cache = {}
-#         self.cache_duration = timedelta(minutes=5)
-    
-#     def normalize_ticker(self, ticker: str) -> str:
-#         """Add .NS suffix if not present"""
-#         ticker = ticker.strip().upper()
-#         if not ticker.endswith('.NS') and not ticker.endswith('.BO'):
-#             ticker = f"{ticker}.NS"
-#         return ticker
-    
-#     def get_stock_data(self, ticker: str, period: str = "1d") -> Optional[pd.DataFrame]:
-#         """Fetch stock data with caching"""
-#         cache_key = f"{ticker}_{period}"
-        
-#         if cache_key in self.cache:
-#             cached_time, cached_data = self.cache[cache_key]
-#             if datetime.now() - cached_time < self.cache_duration:
-#                 return cached_data
-        
-#         try:
-#             ticker = self.normalize_ticker(ticker)
-#             stock = yf.Ticker(ticker)
-#             df = stock.history(period=period)
-            
-#             if not df.empty:
-#                 self.cache[cache_key] = (datetime.now(), df)
-#                 return df
-#         except Exception as e:
-#             print(f"Error fetching {ticker}: {e}")
-        
-#         return None
-    
-#     def get_top_gainers(self, stocks: List[str] = None, limit: int = 10) -> List[Dict]:
-#         """
-#         Get top gaining stocks for the day
-        
-#         Args:
-#             stocks: List of stock symbols (default: NIFTY 50)
-#             limit: Number of top gainers to return
-            
-#         Returns:
-#             List of dictionaries with stock info
-#         """
-#         if stocks is None:
-#             stocks = self.NIFTY_50_STOCKS
-        
-#         gainers = []
-        
-#         for ticker in stocks:
-#             df = self.get_stock_data(ticker, period="5d")
-#             if df is not None and len(df) >= 2:
-#                 try:
-#                     current_price = df['Close'].iloc[-1]
-#                     prev_close = df['Close'].iloc[-2]
-#                     change = current_price - prev_close
-#                     change_pct = (change / prev_close) * 100
-                    
-#                     gainers.append({
-#                         'ticker': ticker,
-#                         'ticker_ns': self.normalize_ticker(ticker),
-#                         'current_price': round(float(current_price), 2),
-#                         'previous_close': round(float(prev_close), 2),
-#                         'change': round(float(change), 2),
-#                         'change_percent': round(float(change_pct), 2),
-#                         'volume': int(df['Volume'].iloc[-1]),
-#                         'high': round(float(df['High'].iloc[-1]), 2),
-#                         'low': round(float(df['Low'].iloc[-1]), 2)
-#                     })
-#                 except Exception as e:
-#                     print(f"Error processing {ticker}: {e}")
-#                     continue
-        
-#         # Sort by change percentage (descending)
-#         gainers.sort(key=lambda x: x['change_percent'], reverse=True)
-#         return gainers[:limit]
-    
-#     def get_top_losers(self, stocks: List[str] = None, limit: int = 10) -> List[Dict]:
-#         """
-#         Get top losing stocks for the day
-        
-#         Args:
-#             stocks: List of stock symbols (default: NIFTY 50)
-#             limit: Number of top losers to return
-            
-#         Returns:
-#             List of dictionaries with stock info
-#         """
-#         if stocks is None:
-#             stocks = self.NIFTY_50_STOCKS
-        
-#         losers = []
-        
-#         for ticker in stocks:
-#             df = self.get_stock_data(ticker, period="5d")
-#             if df is not None and len(df) >= 2:
-#                 try:
-#                     current_price = df['Close'].iloc[-1]
-#                     prev_close = df['Close'].iloc[-2]
-#                     change = current_price - prev_close
-#                     change_pct = (change / prev_close) * 100
-                    
-#                     losers.append({
-#                         'ticker': ticker,
-#                         'ticker_ns': self.normalize_ticker(ticker),
-#                         'current_price': round(float(current_price), 2),
-#                         'previous_close': round(float(prev_close), 2),
-#                         'change': round(float(change), 2),
-#                         'change_percent': round(float(change_pct), 2),
-#                         'volume': int(df['Volume'].iloc[-1]),
-#                         'high': round(float(df['High'].iloc[-1]), 2),
-#                         'low': round(float(df['Low'].iloc[-1]), 2)
-#                     })
-#                 except Exception as e:
-#                     print(f"Error processing {ticker}: {e}")
-#                     continue
-        
-#         # Sort by change percentage (ascending)
-#         losers.sort(key=lambda x: x['change_percent'])
-#         return losers[:limit]
-    
-#     def get_stock_analysis(self, ticker: str, period: str = "1y") -> Optional[Dict]:
-#         """
-#         Comprehensive stock analysis with technical indicators
-        
-#         Args:
-#             ticker: Stock symbol
-#             period: Analysis period
-            
-#         Returns:
-#             Dictionary with comprehensive analysis
-#         """
-#         df = self.get_stock_data(ticker, period=period)
-#         if df is None or df.empty:
-#             return None
-        
-#         try:
-#             ticker_ns = self.normalize_ticker(ticker)
-#             current_price = float(df['Close'].iloc[-1])
-            
-#             # Price statistics
-#             high_52w = float(df['High'].max())
-#             low_52w = float(df['Low'].min())
-#             avg_volume = int(df['Volume'].mean())
-            
-#             # Moving averages
-#             df['sma_20'] = df['Close'].rolling(window=20).mean()
-#             df['sma_50'] = df['Close'].rolling(window=50).mean()
-#             df['sma_200'] = df['Close'].rolling(window=200).mean()
-            
-#             sma_20 = float(df['sma_20'].iloc[-1]) if not pd.isna(df['sma_20'].iloc[-1]) else None
-#             sma_50 = float(df['sma_50'].iloc[-1]) if not pd.isna(df['sma_50'].iloc[-1]) else None
-#             sma_200 = float(df['sma_200'].iloc[-1]) if not pd.isna(df['sma_200'].iloc[-1]) else None
-            
-#             # RSI
-#             delta = df['Close'].diff()
-#             gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-#             loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-#             rs = gain / loss.replace(0, np.nan)
-#             rsi = 100 - (100 / (1 + rs))
-#             current_rsi = float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else 50
-            
-#             # MACD
-#             exp1 = df['Close'].ewm(span=12, adjust=False).mean()
-#             exp2 = df['Close'].ewm(span=26, adjust=False).mean()
-#             macd = exp1 - exp2
-#             signal = macd.ewm(span=9, adjust=False).mean()
-#             macd_histogram = macd - signal
-            
-#             current_macd = float(macd.iloc[-1]) if not pd.isna(macd.iloc[-1]) else 0
-#             current_signal = float(signal.iloc[-1]) if not pd.isna(signal.iloc[-1]) else 0
-#             current_histogram = float(macd_histogram.iloc[-1]) if not pd.isna(macd_histogram.iloc[-1]) else 0
-            
-#             # Bollinger Bands
-#             bb_period = 20
-#             bb_std = 2
-#             df['bb_middle'] = df['Close'].rolling(window=bb_period).mean()
-#             bb_std_dev = df['Close'].rolling(window=bb_period).std()
-#             df['bb_upper'] = df['bb_middle'] + (bb_std_dev * bb_std)
-#             df['bb_lower'] = df['bb_middle'] - (bb_std_dev * bb_std)
-            
-#             bb_upper = float(df['bb_upper'].iloc[-1]) if not pd.isna(df['bb_upper'].iloc[-1]) else None
-#             bb_lower = float(df['bb_lower'].iloc[-1]) if not pd.isna(df['bb_lower'].iloc[-1]) else None
-#             bb_middle = float(df['bb_middle'].iloc[-1]) if not pd.isna(df['bb_middle'].iloc[-1]) else None
-            
-#             # Volatility
-#             returns = df['Close'].pct_change()
-#             volatility = float(returns.std() * np.sqrt(252) * 100)  # Annualized
-            
-#             # Support and Resistance
-#             recent_data = df.tail(50)
-#             support = float(recent_data['Low'].min())
-#             resistance = float(recent_data['High'].max())
-            
-#             # Performance metrics
-#             period_return = ((current_price - df['Close'].iloc[0]) / df['Close'].iloc[0]) * 100
-            
-#             # Trend analysis
-#             trend = self._analyze_trend(df)
-            
-#             # Technical signals
-#             signals = self._generate_technical_signals(
-#                 current_price, sma_20, sma_50, sma_200, 
-#                 current_rsi, current_macd, current_signal
-#             )
-            
-#             return {
-#                 'ticker': ticker_ns,
-#                 'current_price': round(current_price, 2),
-#                 'price_stats': {
-#                     '52_week_high': round(high_52w, 2),
-#                     '52_week_low': round(low_52w, 2),
-#                     'distance_from_high': round(((current_price - high_52w) / high_52w) * 100, 2),
-#                     'distance_from_low': round(((current_price - low_52w) / low_52w) * 100, 2)
-#                 },
-#                 'volume': {
-#                     'current': int(df['Volume'].iloc[-1]),
-#                     'average': avg_volume,
-#                     'ratio': round(float(df['Volume'].iloc[-1]) / avg_volume, 2)
-#                 },
-#                 'moving_averages': {
-#                     'sma_20': round(sma_20, 2) if sma_20 else None,
-#                     'sma_50': round(sma_50, 2) if sma_50 else None,
-#                     'sma_200': round(sma_200, 2) if sma_200 else None
-#                 },
-#                 'indicators': {
-#                     'rsi': round(current_rsi, 2),
-#                     'rsi_signal': self._get_rsi_signal(current_rsi),
-#                     'macd': round(current_macd, 2),
-#                     'macd_signal': round(current_signal, 2),
-#                     'macd_histogram': round(current_histogram, 2),
-#                     'macd_trend': 'Bullish' if current_histogram > 0 else 'Bearish'
-#                 },
-#                 'bollinger_bands': {
-#                     'upper': round(bb_upper, 2) if bb_upper else None,
-#                     'middle': round(bb_middle, 2) if bb_middle else None,
-#                     'lower': round(bb_lower, 2) if bb_lower else None,
-#                     'position': self._get_bb_position(current_price, bb_upper, bb_lower, bb_middle)
-#                 },
-#                 'support_resistance': {
-#                     'support': round(support, 2),
-#                     'resistance': round(resistance, 2),
-#                     'pivot': round((support + resistance + current_price) / 3, 2)
-#                 },
-#                 'volatility': round(volatility, 2),
-#                 'performance': {
-#                     'period_return': round(period_return, 2),
-#                     'period': period
-#                 },
-#                 'trend': trend,
-#                 'technical_signals': signals
-#             }
-        
-#         except Exception as e:
-#             print(f"Error analyzing {ticker}: {e}")
-#             return None
-    
-#     def _analyze_trend(self, df: pd.DataFrame) -> Dict:
-#         """Analyze price trend"""
-#         try:
-#             recent_data = df.tail(20)
-            
-#             # Short-term trend (last 5 days)
-#             short_term = recent_data.tail(5)['Close']
-#             short_trend = 'Up' if short_term.iloc[-1] > short_term.iloc[0] else 'Down'
-            
-#             # Medium-term trend (last 20 days)
-#             medium_trend = 'Up' if df['Close'].iloc[-1] > df['Close'].iloc[-20] else 'Down'
-            
-#             # Calculate trend strength
-#             returns = df['Close'].pct_change().tail(20)
-#             positive_days = (returns > 0).sum()
-#             trend_strength = (positive_days / 20) * 100
-            
-#             return {
-#                 'short_term': short_trend,
-#                 'medium_term': medium_trend,
-#                 'strength': round(trend_strength, 2)
-#             }
-#         except:
-#             return {'short_term': 'Neutral', 'medium_term': 'Neutral', 'strength': 50}
-    
-#     def _get_rsi_signal(self, rsi: float) -> str:
-#         """Get RSI signal"""
-#         if rsi >= 70:
-#             return 'Overbought'
-#         elif rsi <= 30:
-#             return 'Oversold'
-#         else:
-#             return 'Neutral'
-    
-#     def _get_bb_position(self, price, upper, middle, lower) -> str:
-#         """Get position relative to Bollinger Bands"""
-#         if upper is None or lower is None:
-#             return 'Unknown'
-        
-#         if price >= upper:
-#             return 'Above Upper Band (Overbought)'
-#         elif price <= lower:
-#             return 'Below Lower Band (Oversold)'
-#         elif price > middle:
-#             return 'Above Middle (Bullish)'
-#         else:
-#             return 'Below Middle (Bearish)'
-    
-#     def _generate_technical_signals(self, price, sma_20, sma_50, sma_200, rsi, macd, signal) -> Dict:
-#         """Generate buy/sell signals based on technical indicators"""
-#         signals = []
-#         score = 0
-        
-#         # Moving Average signals
-#         if sma_20 and sma_50:
-#             if price > sma_20 > sma_50:
-#                 signals.append('Strong uptrend (Price > SMA20 > SMA50)')
-#                 score += 2
-#             elif price > sma_20:
-#                 signals.append('Bullish (Price > SMA20)')
-#                 score += 1
-#             elif price < sma_20:
-#                 signals.append('Bearish (Price < SMA20)')
-#                 score -= 1
-        
-#         # RSI signals
-#         if rsi <= 30:
-#             signals.append('RSI Oversold - Potential buy opportunity')
-#             score += 2
-#         elif rsi >= 70:
-#             signals.append('RSI Overbought - Consider selling')
-#             score -= 2
-        
-#         # MACD signals
-#         if macd > signal:
-#             signals.append('MACD Bullish crossover')
-#             score += 1
-#         else:
-#             signals.append('MACD Bearish crossover')
-#             score -= 1
-        
-#         # Overall recommendation
-#         if score >= 3:
-#             recommendation = 'Strong Buy'
-#         elif score >= 1:
-#             recommendation = 'Buy'
-#         elif score <= -3:
-#             recommendation = 'Strong Sell'
-#         elif score <= -1:
-#             recommendation = 'Sell'
-#         else:
-#             recommendation = 'Hold'
-        
-#         return {
-#             'signals': signals,
-#             'score': score,
-#             'recommendation': recommendation
-#         }
-    
-#     def get_market_overview(self) -> Dict:
-#         """
-#         Get overall market overview
-        
-#         Returns:
-#             Market statistics and sentiment
-#         """
-#         stocks = self.NIFTY_50_STOCKS[:20]  # Use subset for faster response
-        
-#         advancing = 0
-#         declining = 0
-#         unchanged = 0
-#         total_volume = 0
-        
-#         for ticker in stocks:
-#             df = self.get_stock_data(ticker, period="2d")
-#             if df is not None and len(df) >= 2:
-#                 try:
-#                     current = df['Close'].iloc[-1]
-#                     previous = df['Close'].iloc[-2]
-                    
-#                     if current > previous:
-#                         advancing += 1
-#                     elif current < previous:
-#                         declining += 1
-#                     else:
-#                         unchanged += 1
-                    
-#                     total_volume += int(df['Volume'].iloc[-1])
-#                 except:
-#                     continue
-        
-#         total = advancing + declining + unchanged
-#         if total > 0:
-#             advance_decline_ratio = advancing / declining if declining > 0 else float('inf')
-#             market_sentiment = 'Bullish' if advancing > declining else 'Bearish' if declining > advancing else 'Neutral'
-#         else:
-#             advance_decline_ratio = 0
-#             market_sentiment = 'Unknown'
-        
-#         return {
-#             'advancing': advancing,
-#             'declining': declining,
-#             'unchanged': unchanged,
-#             'advance_decline_ratio': round(advance_decline_ratio, 2) if advance_decline_ratio != float('inf') else None,
-#             'market_sentiment': market_sentiment,
-#             'total_volume': total_volume,
-#             'stocks_analyzed': total,
-#             'timestamp': datetime.now().isoformat()
-#         }
-    
-#     def compare_stocks(self, tickers: List[str], period: str = "6mo") -> List[Dict]:
-#         """
-#         Compare multiple stocks side by side
-        
-#         Args:
-#             tickers: List of stock symbols to compare
-#             period: Comparison period
-            
-#         Returns:
-#             List of stock comparisons
-#         """
-#         comparison = []
-        
-#         for ticker in tickers:
-#             df = self.get_stock_data(ticker, period=period)
-#             if df is not None and not df.empty:
-#                 try:
-#                     ticker_ns = self.normalize_ticker(ticker)
-#                     current_price = float(df['Close'].iloc[-1])
-#                     start_price = float(df['Close'].iloc[0])
-                    
-#                     returns = ((current_price - start_price) / start_price) * 100
-#                     volatility = float(df['Close'].pct_change().std() * np.sqrt(252) * 100)
-                    
-#                     comparison.append({
-#                         'ticker': ticker_ns,
-#                         'current_price': round(current_price, 2),
-#                         'period_return': round(returns, 2),
-#                         'volatility': round(volatility, 2),
-#                         'avg_volume': int(df['Volume'].mean()),
-#                         'high': round(float(df['High'].max()), 2),
-#                         'low': round(float(df['Low'].min()), 2)
-#                     })
-#                 except Exception as e:
-#                     print(f"Error comparing {ticker}: {e}")
-#                     continue
-        
-#         return comparison
-
-
-
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import requests
 from typing import List, Dict, Optional
 from datetime import datetime, timedelta
 import warnings
-warnings.filterwarnings("ignore")
-
+warnings.filterwarnings('ignore')
 
 class MarketAnalyzer:
     """
-    Cloud-safe market analysis engine for Render + HuggingFace.
-    Uses:
-        - Custom session with UA headers
-        - Retry logic
-        - Fallback Yahoo endpoints
-        - Error-resilient DataFrame checks
+    Advanced market analysis engine for NSE stocks
     """
-
+    
+    # Popular NSE stocks for market overview
     NIFTY_50_STOCKS = [
         'RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK',
         'HINDUNILVR', 'ITC', 'SBIN', 'BHARTIARTL', 'KOTAKBANK',
@@ -497,414 +20,449 @@ class MarketAnalyzer:
         'ONGC', 'NTPC', 'POWERGRID', 'M&M', 'TECHM',
         'TATAMOTORS', 'HCLTECH', 'ADANIPORTS', 'COALINDIA', 'TATASTEEL'
     ]
-
+    
     def __init__(self):
         self.cache = {}
         self.cache_duration = timedelta(minutes=5)
-
-        # Create a reusable session for Yahoo Finance (cloud-safe)
-        self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            )
-        })
-
-    # --------------------------------------------------------------------------
-    # Ticker Normalization
-    # --------------------------------------------------------------------------
+    
     def normalize_ticker(self, ticker: str) -> str:
-        ticker = ticker.upper().strip()
-        if not ticker.endswith(".NS") and not ticker.endswith(".BO"):
-            ticker += ".NS"
+        """Add .NS suffix if not present"""
+        ticker = ticker.strip().upper()
+        if not ticker.endswith('.NS') and not ticker.endswith('.BO'):
+            ticker = f"{ticker}.NS"
         return ticker
-
-    # --------------------------------------------------------------------------
-    # Cloud-Safe yfinance Getter with Retries
-    # --------------------------------------------------------------------------
-    def fetch_with_retries(self, ticker, period):
-        """
-        yfinance fallback logic for cloud:
-            1. Try yfinance with session
-            2. If empty → try ticker.history() alternative
-            3. If still empty → try Yahoo chart API JSON endpoint
-        """
-
-        # --- Attempt 1: yfinance with injected custom session ---
-        try:
-            stock = yf.Ticker(ticker, session=self.session)
-            df = stock.history(period=period, auto_adjust=False)
-            if df is not None and not df.empty:
-                return df
-        except Exception:
-            pass
-
-        # --- Attempt 2: fallback call using yf.download ---
-        try:
-            df = yf.download(
-                tickers=ticker,
-                period=period,
-                progress=False,
-                session=self.session
-            )
-            if df is not None and not df.empty:
-                return df
-        except Exception:
-            pass
-
-        # --- Attempt 3: Yahoo Chart API fallback ---
-        try:
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range={period}&interval=1d"
-            r = self.session.get(url, timeout=5)
-            data = r.json()
-
-            timestamps = data["chart"]["result"][0]["timestamp"]
-            indicators = data["chart"]["result"][0]["indicators"]["quote"][0]
-
-            df = pd.DataFrame({
-                "Date": pd.to_datetime(timestamps, unit="s"),
-                "Open": indicators.get("open"),
-                "High": indicators.get("high"),
-                "Low": indicators.get("low"),
-                "Close": indicators.get("close"),
-                "Volume": indicators.get("volume"),
-            }).dropna()
-
-            df.set_index("Date", inplace=True)
-
-            if not df.empty:
-                return df
-        except Exception:
-            pass
-
-        # All failed
-        return None
-
-    # --------------------------------------------------------------------------
-    # STOCK DATA FETCH (fixed)
-    # --------------------------------------------------------------------------
+    
     def get_stock_data(self, ticker: str, period: str = "1d") -> Optional[pd.DataFrame]:
-        ticker = self.normalize_ticker(ticker)
+        """Fetch stock data with caching"""
         cache_key = f"{ticker}_{period}"
-
-        # Cache check
+        
         if cache_key in self.cache:
-            t, data = self.cache[cache_key]
-            if datetime.now() - t < self.cache_duration:
-                return data
-
-        # Fetch using fallback chain
-        df = self.fetch_with_retries(ticker, period)
-
-        if df is not None and not df.empty:
-            self.cache[cache_key] = (datetime.now(), df)
-            return df
-
+            cached_time, cached_data = self.cache[cache_key]
+            if datetime.now() - cached_time < self.cache_duration:
+                return cached_data
+        
+        try:
+            ticker = self.normalize_ticker(ticker)
+            stock = yf.Ticker(ticker)
+            df = stock.history(period=period)
+            
+            if not df.empty:
+                self.cache[cache_key] = (datetime.now(), df)
+                return df
+        except Exception as e:
+            print(f"Error fetching {ticker}: {e}")
+        
         return None
-
-    # --------------------------------------------------------------------------
-    # TOP GAINERS (safe)
-    # --------------------------------------------------------------------------
+    
     def get_top_gainers(self, stocks: List[str] = None, limit: int = 10) -> List[Dict]:
+        """
+        Get top gaining stocks for the day
+        
+        Args:
+            stocks: List of stock symbols (default: NIFTY 50)
+            limit: Number of top gainers to return
+            
+        Returns:
+            List of dictionaries with stock info
+        """
         if stocks is None:
             stocks = self.NIFTY_50_STOCKS
-
+        
         gainers = []
-
+        
         for ticker in stocks:
             df = self.get_stock_data(ticker, period="5d")
-            if df is None or len(df) < 2:
-                continue
-
-            try:
-                cp = df["Close"].iloc[-1]
-                pp = df["Close"].iloc[-2]
-                change = cp - pp
-                pct = (change / pp) * 100
-
-                gainers.append({
-                    "ticker": ticker,
-                    "ticker_ns": self.normalize_ticker(ticker),
-                    "current_price": float(cp),
-                    "previous_close": float(pp),
-                    "change": float(change),
-                    "change_percent": float(pct),
-                    "volume": int(df["Volume"].iloc[-1]),
-                    "high": float(df["High"].iloc[-1]),
-                    "low": float(df["Low"].iloc[-1]),
-                })
-            except:
-                continue
-
-        gainers.sort(key=lambda x: x["change_percent"], reverse=True)
+            if df is not None and len(df) >= 2:
+                try:
+                    current_price = df['Close'].iloc[-1]
+                    prev_close = df['Close'].iloc[-2]
+                    change = current_price - prev_close
+                    change_pct = (change / prev_close) * 100
+                    
+                    gainers.append({
+                        'ticker': ticker,
+                        'ticker_ns': self.normalize_ticker(ticker),
+                        'current_price': round(float(current_price), 2),
+                        'previous_close': round(float(prev_close), 2),
+                        'change': round(float(change), 2),
+                        'change_percent': round(float(change_pct), 2),
+                        'volume': int(df['Volume'].iloc[-1]),
+                        'high': round(float(df['High'].iloc[-1]), 2),
+                        'low': round(float(df['Low'].iloc[-1]), 2)
+                    })
+                except Exception as e:
+                    print(f"Error processing {ticker}: {e}")
+                    continue
+        
+        # Sort by change percentage (descending)
+        gainers.sort(key=lambda x: x['change_percent'], reverse=True)
         return gainers[:limit]
-
-    # --------------------------------------------------------------------------
-    # TOP LOSERS (safe)
-    # --------------------------------------------------------------------------
+    
     def get_top_losers(self, stocks: List[str] = None, limit: int = 10) -> List[Dict]:
+        """
+        Get top losing stocks for the day
+        
+        Args:
+            stocks: List of stock symbols (default: NIFTY 50)
+            limit: Number of top losers to return
+            
+        Returns:
+            List of dictionaries with stock info
+        """
         if stocks is None:
             stocks = self.NIFTY_50_STOCKS
-
+        
         losers = []
-
+        
         for ticker in stocks:
             df = self.get_stock_data(ticker, period="5d")
-            if df is None or len(df) < 2:
-                continue
-
-            try:
-                cp = df["Close"].iloc[-1]
-                pp = df["Close"].iloc[-2]
-                change = cp - pp
-                pct = (change / pp) * 100
-
-                losers.append({
-                    "ticker": ticker,
-                    "ticker_ns": self.normalize_ticker(ticker),
-                    "current_price": float(cp),
-                    "previous_close": float(pp),
-                    "change": float(change),
-                    "change_percent": float(pct),
-                    "volume": int(df["Volume"].iloc[-1]),
-                    "high": float(df["High"].iloc[-1]),
-                    "low": float(df["Low"].iloc[-1]),
-                })
-            except:
-                continue
-
-        losers.sort(key=lambda x: x["change_percent"])
+            if df is not None and len(df) >= 2:
+                try:
+                    current_price = df['Close'].iloc[-1]
+                    prev_close = df['Close'].iloc[-2]
+                    change = current_price - prev_close
+                    change_pct = (change / prev_close) * 100
+                    
+                    losers.append({
+                        'ticker': ticker,
+                        'ticker_ns': self.normalize_ticker(ticker),
+                        'current_price': round(float(current_price), 2),
+                        'previous_close': round(float(prev_close), 2),
+                        'change': round(float(change), 2),
+                        'change_percent': round(float(change_pct), 2),
+                        'volume': int(df['Volume'].iloc[-1]),
+                        'high': round(float(df['High'].iloc[-1]), 2),
+                        'low': round(float(df['Low'].iloc[-1]), 2)
+                    })
+                except Exception as e:
+                    print(f"Error processing {ticker}: {e}")
+                    continue
+        
+        # Sort by change percentage (ascending)
+        losers.sort(key=lambda x: x['change_percent'])
         return losers[:limit]
-
-    # --------------------------------------------------------------------------
-    # FULL STOCK ANALYSIS (safe)
-    # --------------------------------------------------------------------------
+    
     def get_stock_analysis(self, ticker: str, period: str = "1y") -> Optional[Dict]:
-        df = self.get_stock_data(ticker, period)
+        """
+        Comprehensive stock analysis with technical indicators
+        
+        Args:
+            ticker: Stock symbol
+            period: Analysis period
+            
+        Returns:
+            Dictionary with comprehensive analysis
+        """
+        df = self.get_stock_data(ticker, period=period)
         if df is None or df.empty:
             return None
-
+        
         try:
             ticker_ns = self.normalize_ticker(ticker)
-            current_price = float(df["Close"].iloc[-1])
-
-            high_52w = float(df["High"].max())
-            low_52w = float(df["Low"].min())
-            avg_volume = int(df["Volume"].mean())
-
+            current_price = float(df['Close'].iloc[-1])
+            
+            # Price statistics
+            high_52w = float(df['High'].max())
+            low_52w = float(df['Low'].min())
+            avg_volume = int(df['Volume'].mean())
+            
             # Moving averages
-            df["sma_20"] = df["Close"].rolling(20).mean()
-            df["sma_50"] = df["Close"].rolling(50).mean()
-            df["sma_200"] = df["Close"].rolling(200).mean()
-
+            df['sma_20'] = df['Close'].rolling(window=20).mean()
+            df['sma_50'] = df['Close'].rolling(window=50).mean()
+            df['sma_200'] = df['Close'].rolling(window=200).mean()
+            
+            sma_20 = float(df['sma_20'].iloc[-1]) if not pd.isna(df['sma_20'].iloc[-1]) else None
+            sma_50 = float(df['sma_50'].iloc[-1]) if not pd.isna(df['sma_50'].iloc[-1]) else None
+            sma_200 = float(df['sma_200'].iloc[-1]) if not pd.isna(df['sma_200'].iloc[-1]) else None
+            
             # RSI
-            delta = df["Close"].diff()
-            gain = delta.where(delta > 0, 0).rolling(14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+            delta = df['Close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
             rs = gain / loss.replace(0, np.nan)
             rsi = 100 - (100 / (1 + rs))
             current_rsi = float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else 50
-
+            
             # MACD
-            exp12 = df["Close"].ewm(span=12, adjust=False).mean()
-            exp26 = df["Close"].ewm(span=26, adjust=False).mean()
-            macd = exp12 - exp26
+            exp1 = df['Close'].ewm(span=12, adjust=False).mean()
+            exp2 = df['Close'].ewm(span=26, adjust=False).mean()
+            macd = exp1 - exp2
             signal = macd.ewm(span=9, adjust=False).mean()
-            histogram = macd - signal
-
+            macd_histogram = macd - signal
+            
+            current_macd = float(macd.iloc[-1]) if not pd.isna(macd.iloc[-1]) else 0
+            current_signal = float(signal.iloc[-1]) if not pd.isna(signal.iloc[-1]) else 0
+            current_histogram = float(macd_histogram.iloc[-1]) if not pd.isna(macd_histogram.iloc[-1]) else 0
+            
             # Bollinger Bands
-            mid = df["Close"].rolling(20).mean()
-            std = df["Close"].rolling(20).std()
-            bb_upper = mid + std * 2
-            bb_lower = mid - std * 2
-
-            # Trend
+            bb_period = 20
+            bb_std = 2
+            df['bb_middle'] = df['Close'].rolling(window=bb_period).mean()
+            bb_std_dev = df['Close'].rolling(window=bb_period).std()
+            df['bb_upper'] = df['bb_middle'] + (bb_std_dev * bb_std)
+            df['bb_lower'] = df['bb_middle'] - (bb_std_dev * bb_std)
+            
+            bb_upper = float(df['bb_upper'].iloc[-1]) if not pd.isna(df['bb_upper'].iloc[-1]) else None
+            bb_lower = float(df['bb_lower'].iloc[-1]) if not pd.isna(df['bb_lower'].iloc[-1]) else None
+            bb_middle = float(df['bb_middle'].iloc[-1]) if not pd.isna(df['bb_middle'].iloc[-1]) else None
+            
+            # Volatility
+            returns = df['Close'].pct_change()
+            volatility = float(returns.std() * np.sqrt(252) * 100)  # Annualized
+            
+            # Support and Resistance
+            recent_data = df.tail(50)
+            support = float(recent_data['Low'].min())
+            resistance = float(recent_data['High'].max())
+            
+            # Performance metrics
+            period_return = ((current_price - df['Close'].iloc[0]) / df['Close'].iloc[0]) * 100
+            
+            # Trend analysis
             trend = self._analyze_trend(df)
-
+            
             # Technical signals
-            signals = self._generate_signals(
-                current_price,
-                df["sma_20"].iloc[-1],
-                df["sma_50"].iloc[-1],
-                df["sma_200"].iloc[-1],
-                current_rsi,
-                macd.iloc[-1],
-                signal.iloc[-1],
+            signals = self._generate_technical_signals(
+                current_price, sma_20, sma_50, sma_200, 
+                current_rsi, current_macd, current_signal
             )
-
+            
             return {
-                "ticker": ticker_ns,
-                "current_price": current_price,
-                "price_stats": {
-                    "52_week_high": high_52w,
-                    "52_week_low": low_52w,
-                    "distance_from_high": round(((current_price - high_52w) / high_52w) * 100, 2),
-                    "distance_from_low": round(((current_price - low_52w) / low_52w) * 100, 2),
+                'ticker': ticker_ns,
+                'current_price': round(current_price, 2),
+                'price_stats': {
+                    '52_week_high': round(high_52w, 2),
+                    '52_week_low': round(low_52w, 2),
+                    'distance_from_high': round(((current_price - high_52w) / high_52w) * 100, 2),
+                    'distance_from_low': round(((current_price - low_52w) / low_52w) * 100, 2)
                 },
-                "volume": {
-                    "current": int(df["Volume"].iloc[-1]),
-                    "average": avg_volume,
-                    "ratio": round(df["Volume"].iloc[-1] / avg_volume, 2),
+                'volume': {
+                    'current': int(df['Volume'].iloc[-1]),
+                    'average': avg_volume,
+                    'ratio': round(float(df['Volume'].iloc[-1]) / avg_volume, 2)
                 },
-                "moving_averages": {
-                    "sma_20": float(df["sma_20"].iloc[-1]),
-                    "sma_50": float(df["sma_50"].iloc[-1]),
-                    "sma_200": float(df["sma_200"].iloc[-1]),
+                'moving_averages': {
+                    'sma_20': round(sma_20, 2) if sma_20 else None,
+                    'sma_50': round(sma_50, 2) if sma_50 else None,
+                    'sma_200': round(sma_200, 2) if sma_200 else None
                 },
-                "indicators": {
-                    "rsi": current_rsi,
-                    "rsi_signal": self._rsi_signal(current_rsi),
-                    "macd": float(macd.iloc[-1]),
-                    "macd_signal": float(signal.iloc[-1]),
-                    "macd_histogram": float(histogram.iloc[-1]),
-                    "macd_trend": "Bullish" if histogram.iloc[-1] > 0 else "Bearish",
+                'indicators': {
+                    'rsi': round(current_rsi, 2),
+                    'rsi_signal': self._get_rsi_signal(current_rsi),
+                    'macd': round(current_macd, 2),
+                    'macd_signal': round(current_signal, 2),
+                    'macd_histogram': round(current_histogram, 2),
+                    'macd_trend': 'Bullish' if current_histogram > 0 else 'Bearish'
                 },
-                "bollinger_bands": {
-                    "upper": float(bb_upper.iloc[-1]),
-                    "lower": float(bb_lower.iloc[-1]),
-                    "middle": float(mid.iloc[-1]),
+                'bollinger_bands': {
+                    'upper': round(bb_upper, 2) if bb_upper else None,
+                    'middle': round(bb_middle, 2) if bb_middle else None,
+                    'lower': round(bb_lower, 2) if bb_lower else None,
+                    'position': self._get_bb_position(current_price, bb_upper, bb_lower, bb_middle)
                 },
-                "trend": trend,
-                "technical_signals": signals,
+                'support_resistance': {
+                    'support': round(support, 2),
+                    'resistance': round(resistance, 2),
+                    'pivot': round((support + resistance + current_price) / 3, 2)
+                },
+                'volatility': round(volatility, 2),
+                'performance': {
+                    'period_return': round(period_return, 2),
+                    'period': period
+                },
+                'trend': trend,
+                'technical_signals': signals
             }
-
-        except Exception:
+        
+        except Exception as e:
+            print(f"Error analyzing {ticker}: {e}")
             return None
-
-    # --------------------------------------------------------------------------
-    # Helper Functions
-    # --------------------------------------------------------------------------
-    def _analyze_trend(self, df):
+    
+    def _analyze_trend(self, df: pd.DataFrame) -> Dict:
+        """Analyze price trend"""
         try:
-            returns = df["Close"].pct_change().tail(20)
+            recent_data = df.tail(20)
+            
+            # Short-term trend (last 5 days)
+            short_term = recent_data.tail(5)['Close']
+            short_trend = 'Up' if short_term.iloc[-1] > short_term.iloc[0] else 'Down'
+            
+            # Medium-term trend (last 20 days)
+            medium_trend = 'Up' if df['Close'].iloc[-1] > df['Close'].iloc[-20] else 'Down'
+            
+            # Calculate trend strength
+            returns = df['Close'].pct_change().tail(20)
             positive_days = (returns > 0).sum()
-            strength = (positive_days / 20) * 100
-
-            short_trend = (
-                "Up" if df["Close"].iloc[-1] > df["Close"].iloc[-5] else "Down"
-            )
-            medium_trend = (
-                "Up" if df["Close"].iloc[-1] > df["Close"].iloc[-20] else "Down"
-            )
-
+            trend_strength = (positive_days / 20) * 100
+            
             return {
-                "short_term": short_trend,
-                "medium_term": medium_trend,
-                "strength": round(strength, 2),
+                'short_term': short_trend,
+                'medium_term': medium_trend,
+                'strength': round(trend_strength, 2)
             }
         except:
-            return {"short_term": "Neutral", "medium_term": "Neutral", "strength": 50}
-
-    def _rsi_signal(self, rsi):
+            return {'short_term': 'Neutral', 'medium_term': 'Neutral', 'strength': 50}
+    
+    def _get_rsi_signal(self, rsi: float) -> str:
+        """Get RSI signal"""
         if rsi >= 70:
-            return "Overbought"
-        if rsi <= 30:
-            return "Oversold"
-        return "Neutral"
-
-    def _generate_signals(self, price, sma20, sma50, sma200, rsi, macd, signal):
-        score = 0
-        notes = []
-
-        if price > sma20 > sma50:
-            score += 2
-            notes.append("Strong Uptrend")
-        elif price < sma20:
-            score -= 1
-            notes.append("Weak Trend")
-
-        if rsi <= 30:
-            score += 2
-            notes.append("RSI Oversold")
-        elif rsi >= 70:
-            score -= 2
-            notes.append("RSI Overbought")
-
-        if macd > signal:
-            score += 1
-            notes.append("MACD Bullish Crossover")
+            return 'Overbought'
+        elif rsi <= 30:
+            return 'Oversold'
         else:
+            return 'Neutral'
+    
+    def _get_bb_position(self, price, upper, middle, lower) -> str:
+        """Get position relative to Bollinger Bands"""
+        if upper is None or lower is None:
+            return 'Unknown'
+        
+        if price >= upper:
+            return 'Above Upper Band (Overbought)'
+        elif price <= lower:
+            return 'Below Lower Band (Oversold)'
+        elif price > middle:
+            return 'Above Middle (Bullish)'
+        else:
+            return 'Below Middle (Bearish)'
+    
+    def _generate_technical_signals(self, price, sma_20, sma_50, sma_200, rsi, macd, signal) -> Dict:
+        """Generate buy/sell signals based on technical indicators"""
+        signals = []
+        score = 0
+        
+        # Moving Average signals
+        if sma_20 and sma_50:
+            if price > sma_20 > sma_50:
+                signals.append('Strong uptrend (Price > SMA20 > SMA50)')
+                score += 2
+            elif price > sma_20:
+                signals.append('Bullish (Price > SMA20)')
+                score += 1
+            elif price < sma_20:
+                signals.append('Bearish (Price < SMA20)')
+                score -= 1
+        
+        # RSI signals
+        if rsi <= 30:
+            signals.append('RSI Oversold - Potential buy opportunity')
+            score += 2
+        elif rsi >= 70:
+            signals.append('RSI Overbought - Consider selling')
+            score -= 2
+        
+        # MACD signals
+        if macd > signal:
+            signals.append('MACD Bullish crossover')
+            score += 1
+        else:
+            signals.append('MACD Bearish crossover')
             score -= 1
-            notes.append("MACD Bearish Crossover")
-
-        recommendation = (
-            "Strong Buy" if score >= 3 else
-            "Buy" if score >= 1 else
-            "Sell" if score <= -1 else
-            "Hold"
-        )
-
+        
+        # Overall recommendation
+        if score >= 3:
+            recommendation = 'Strong Buy'
+        elif score >= 1:
+            recommendation = 'Buy'
+        elif score <= -3:
+            recommendation = 'Strong Sell'
+        elif score <= -1:
+            recommendation = 'Sell'
+        else:
+            recommendation = 'Hold'
+        
         return {
-            "signals": notes,
-            "score": score,
-            "recommendation": recommendation,
+            'signals': signals,
+            'score': score,
+            'recommendation': recommendation
         }
-
-    # --------------------------------------------------------------------------
-    # MARKET OVERVIEW
-    # --------------------------------------------------------------------------
-    def get_market_overview(self):
+    
+    def get_market_overview(self) -> Dict:
+        """
+        Get overall market overview
+        
+        Returns:
+            Market statistics and sentiment
+        """
+        stocks = self.NIFTY_50_STOCKS[:20]  # Use subset for faster response
+        
         advancing = 0
         declining = 0
-        volume_total = 0
-
-        for ticker in self.NIFTY_50_STOCKS[:20]:
-            df = self.get_stock_data(ticker, "2d")
-            if df is None or len(df) < 2:
-                continue
-
-            cp = df["Close"].iloc[-1]
-            pp = df["Close"].iloc[-2]
-
-            if cp > pp:
-                advancing += 1
-            elif cp < pp:
-                declining += 1
-
-            volume_total += int(df["Volume"].iloc[-1])
-
-        sentiment = (
-            "Bullish" if advancing > declining else
-            "Bearish" if declining > advancing else
-            "Neutral"
-        )
-
+        unchanged = 0
+        total_volume = 0
+        
+        for ticker in stocks:
+            df = self.get_stock_data(ticker, period="2d")
+            if df is not None and len(df) >= 2:
+                try:
+                    current = df['Close'].iloc[-1]
+                    previous = df['Close'].iloc[-2]
+                    
+                    if current > previous:
+                        advancing += 1
+                    elif current < previous:
+                        declining += 1
+                    else:
+                        unchanged += 1
+                    
+                    total_volume += int(df['Volume'].iloc[-1])
+                except:
+                    continue
+        
+        total = advancing + declining + unchanged
+        if total > 0:
+            advance_decline_ratio = advancing / declining if declining > 0 else float('inf')
+            market_sentiment = 'Bullish' if advancing > declining else 'Bearish' if declining > advancing else 'Neutral'
+        else:
+            advance_decline_ratio = 0
+            market_sentiment = 'Unknown'
+        
         return {
-            "advancing": advancing,
-            "declining": declining,
-            "unchanged": 20 - advancing - declining,
-            "market_sentiment": sentiment,
-            "total_volume": volume_total,
-            "timestamp": datetime.now().isoformat(),
+            'advancing': advancing,
+            'declining': declining,
+            'unchanged': unchanged,
+            'advance_decline_ratio': round(advance_decline_ratio, 2) if advance_decline_ratio != float('inf') else None,
+            'market_sentiment': market_sentiment,
+            'total_volume': total_volume,
+            'stocks_analyzed': total,
+            'timestamp': datetime.now().isoformat()
         }
-
-    # --------------------------------------------------------------------------
-    # STOCK COMPARISON
-    # --------------------------------------------------------------------------
+    
     def compare_stocks(self, tickers: List[str], period: str = "6mo") -> List[Dict]:
-        results = []
-
+        """
+        Compare multiple stocks side by side
+        
+        Args:
+            tickers: List of stock symbols to compare
+            period: Comparison period
+            
+        Returns:
+            List of stock comparisons
+        """
+        comparison = []
+        
         for ticker in tickers:
-            df = self.get_stock_data(ticker, period)
-            if df is None or df.empty:
-                continue
-
-            cp = df["Close"].iloc[-1]
-            sp = df["Close"].iloc[0]
-
-            returns = ((cp - sp) / sp) * 100
-            vol = df["Close"].pct_change().std() * np.sqrt(252) * 100
-
-            results.append({
-                "ticker": self.normalize_ticker(ticker),
-                "current_price": float(cp),
-                "period_return": float(returns),
-                "volatility": float(vol),
-                "avg_volume": int(df["Volume"].mean()),
-                "high": float(df["High"].max()),
-                "low": float(df["Low"].min()),
-            })
-
-        return results
+            df = self.get_stock_data(ticker, period=period)
+            if df is not None and not df.empty:
+                try:
+                    ticker_ns = self.normalize_ticker(ticker)
+                    current_price = float(df['Close'].iloc[-1])
+                    start_price = float(df['Close'].iloc[0])
+                    
+                    returns = ((current_price - start_price) / start_price) * 100
+                    volatility = float(df['Close'].pct_change().std() * np.sqrt(252) * 100)
+                    
+                    comparison.append({
+                        'ticker': ticker_ns,
+                        'current_price': round(current_price, 2),
+                        'period_return': round(returns, 2),
+                        'volatility': round(volatility, 2),
+                        'avg_volume': int(df['Volume'].mean()),
+                        'high': round(float(df['High'].max()), 2),
+                        'low': round(float(df['Low'].min()), 2)
+                    })
+                except Exception as e:
+                    print(f"Error comparing {ticker}: {e}")
+                    continue
+        
+        return comparison
