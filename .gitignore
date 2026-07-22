@@ -1,0 +1,27 @@
+# Environment
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+myenv/
+venv/
+.venv/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Alembic (keep versions, ignore local artifacts)
+
+# OS/editor
+.vscode/
+.idea/
+*.log
+
+# Old JSON persistence (retired in favor of Postgres)
+data/*.json

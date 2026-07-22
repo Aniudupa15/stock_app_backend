@@ -1,0 +1,23 @@
+# Fallback test Postgres for environments without Docker-driven testcontainers
+# (e.g. Docker-in-Docker restrictions). Point DATABASE_URL at this instance
+# and run pytest against tests/integration and tests/api directly:
+#
+#   docker compose -f docker/docker-compose.test.yml up -d
+#   DATABASE_URL=postgresql+asyncpg://stockapp:stockapp@localhost:5433/stockapp_test pytest
+#
+services:
+  test-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: stockapp
+      POSTGRES_PASSWORD: stockapp
+      POSTGRES_DB: stockapp_test
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stockapp -d stockapp_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
