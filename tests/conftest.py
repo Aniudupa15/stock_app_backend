@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import uuid
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -12,23 +13,47 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.core.config import Settings
 from app.domain.entities import (
+    Alert,
+    AlertStatus,
+    AlertType,
     BhavcopyRecord,
     CorporateAction,
     FinancialResultFiling,
     FinancialResultRecord,
+    IndexQuote,
     InstrumentType,
+    MarketMover,
+    MarketStatus,
+    NewsArticle,
+    NewsCategory,
+    Notification,
     OhlcvBar,
+    Portfolio,
+    PortfolioTransaction,
     Quote,
+    RefreshToken,
     Stock,
     StockMasterRecord,
+    User,
+    Watchlist,
+    WatchlistItem,
 )
 from app.domain.ports import (
+    AlertRepositoryPort,
     CachePort,
     CorporateActionRepositoryPort,
     FinancialResultRepositoryPort,
     HistoricalPriceRepositoryPort,
+    MarketMoverRepositoryPort,
+    NewsProviderPort,
+    NewsRepositoryPort,
+    NotificationRepositoryPort,
+    PortfolioRepositoryPort,
+    RefreshTokenRepositoryPort,
     StockDataProviderPort,
     StockRepositoryPort,
+    UserRepositoryPort,
+    WatchlistRepositoryPort,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -59,9 +84,7 @@ class FakeStockRepository(StockRepositoryPort):
 
     async def search_by_symbol_or_name(self, query: str, limit: int) -> list[Stock]:
         q = query.strip().lower()
-        matches = [
-            s for s in self.stocks.values() if q in s.symbol.lower() or q in s.name.lower()
-        ]
+        matches = [s for s in self.stocks.values() if q in s.symbol.lower() or q in s.name.lower()]
         return matches[:limit]
 
     async def upsert_universe(self, records: list[StockMasterRecord]) -> int:
@@ -90,6 +113,9 @@ class FakeStockRepository(StockRepositoryPort):
                 count += 1
         return count
 
+    async def list_active_symbols(self) -> list[str]:
+        return [s.symbol for s in self.stocks.values() if s.is_active]
+
 
 class FakeStockDataProvider(StockDataProviderPort):
     def __init__(
@@ -100,6 +126,8 @@ class FakeStockDataProvider(StockDataProviderPort):
         corporate_actions: list[CorporateAction] | None = None,
         financial_filings: list[FinancialResultFiling] | None = None,
         financial_details: dict[str, FinancialResultRecord] | None = None,
+        market_statuses: list[MarketStatus] | None = None,
+        indices: list[IndexQuote] | None = None,
     ):
         self.quotes = quotes or {}
         self.universe = universe or []
@@ -107,6 +135,8 @@ class FakeStockDataProvider(StockDataProviderPort):
         self.corporate_actions = corporate_actions or []
         self.financial_filings = financial_filings or []
         self.financial_details = financial_details or {}  # keyed by xbrl_url
+        self.market_statuses = market_statuses or []
+        self.indices = indices or []
         self.fail_with: Exception | None = None
 
     async def get_quote(self, symbol: str) -> Quote:
@@ -142,6 +172,16 @@ class FakeStockDataProvider(StockDataProviderPort):
         if self.fail_with:
             raise self.fail_with
         return self.financial_details.get(filing.xbrl_url)
+
+    async def fetch_market_status(self) -> list[MarketStatus]:
+        if self.fail_with:
+            raise self.fail_with
+        return self.market_statuses
+
+    async def fetch_indices(self) -> list[IndexQuote]:
+        if self.fail_with:
+            raise self.fail_with
+        return self.indices
 
 
 class FakeHistoricalPriceRepository(HistoricalPriceRepositoryPort):
@@ -189,6 +229,275 @@ class FakeFinancialResultRepository(FinancialResultRepositoryPort):
         ]
         quarters.sort(key=lambda q: q.period_end, reverse=True)
         return quarters[:limit]
+
+
+class FakeMarketMoverRepository(MarketMoverRepositoryPort):
+    def __init__(
+        self,
+        top_movers: dict[str, list[MarketMover]] | None = None,
+        most_active: list[MarketMover] | None = None,
+        extremes: dict[str, list[MarketMover]] | None = None,
+        latest_prices: dict[str, MarketMover] | None = None,
+    ):
+        self.top_movers = top_movers or {}  # keyed by "gainers"/"losers"
+        self.most_active = most_active or []
+        self.extremes = extremes or {}  # keyed by "high"/"low"
+        self.latest_prices = latest_prices or {}  # keyed by symbol
+        self.calls: list[tuple] = []
+
+    async def get_top_movers(self, direction: str, lookback_sessions: int, limit: int) -> list[MarketMover]:
+        self.calls.append(("get_top_movers", direction, lookback_sessions, limit))
+        return self.top_movers.get(direction, [])[:limit]
+
+    async def get_most_active(self, limit: int) -> list[MarketMover]:
+        self.calls.append(("get_most_active", limit))
+        return self.most_active[:limit]
+
+    async def get_latest_prices(self, symbols: list[str]) -> list[MarketMover]:
+        self.calls.append(("get_latest_prices", tuple(symbols)))
+        return [self.latest_prices[s] for s in symbols if s in self.latest_prices]
+
+    async def get_52_week_extremes(self, direction: str, limit: int) -> list[MarketMover]:
+        self.calls.append(("get_52_week_extremes", direction, limit))
+        return self.extremes.get(direction, [])[:limit]
+
+
+class FakeWatchlistRepository(WatchlistRepositoryPort):
+    def __init__(self, known_symbols: set[str] | None = None):
+        self.known_symbols = known_symbols or set()
+        self.watchlists: dict[uuid.UUID, Watchlist] = {}
+        self.items: dict[uuid.UUID, list[WatchlistItem]] = {}
+
+    async def create(self, user_id: uuid.UUID, name: str) -> Watchlist:
+        watchlist = Watchlist(id=uuid.uuid4(), user_id=user_id, name=name, created_at=datetime.now(UTC))
+        self.watchlists[watchlist.id] = watchlist
+        self.items[watchlist.id] = []
+        return watchlist
+
+    async def list_for_user(self, user_id: uuid.UUID) -> list[Watchlist]:
+        return [w for w in self.watchlists.values() if w.user_id == user_id]
+
+    async def get(self, watchlist_id: uuid.UUID, user_id: uuid.UUID) -> Watchlist | None:
+        w = self.watchlists.get(watchlist_id)
+        if w is None or w.user_id != user_id:
+            return None
+        return w
+
+    async def delete(self, watchlist_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+        w = self.watchlists.get(watchlist_id)
+        if w is None or w.user_id != user_id:
+            return False
+        del self.watchlists[watchlist_id]
+        self.items.pop(watchlist_id, None)
+        return True
+
+    async def add_item(self, watchlist_id: uuid.UUID, symbol: str) -> bool:
+        symbol = symbol.strip().upper()
+        if symbol not in self.known_symbols:
+            return False
+        existing = self.items.setdefault(watchlist_id, [])
+        if not any(i.symbol == symbol for i in existing):
+            existing.append(WatchlistItem(symbol=symbol, name=f"{symbol} Ltd", added_at=datetime.now(UTC)))
+        return True
+
+    async def remove_item(self, watchlist_id: uuid.UUID, symbol: str) -> bool:
+        symbol = symbol.strip().upper()
+        existing = self.items.get(watchlist_id, [])
+        before = len(existing)
+        self.items[watchlist_id] = [i for i in existing if i.symbol != symbol]
+        return len(self.items[watchlist_id]) != before
+
+    async def get_items(self, watchlist_id: uuid.UUID) -> list[WatchlistItem]:
+        return self.items.get(watchlist_id, [])
+
+
+class FakePortfolioRepository(PortfolioRepositoryPort):
+    def __init__(self, known_symbols: set[str] | None = None):
+        self.known_symbols = known_symbols or set()
+        self.portfolios: dict[uuid.UUID, Portfolio] = {}
+        self.transactions: dict[uuid.UUID, list[PortfolioTransaction]] = {}
+
+    async def create(self, user_id: uuid.UUID, name: str) -> Portfolio:
+        portfolio = Portfolio(id=uuid.uuid4(), user_id=user_id, name=name, created_at=datetime.now(UTC))
+        self.portfolios[portfolio.id] = portfolio
+        self.transactions[portfolio.id] = []
+        return portfolio
+
+    async def list_for_user(self, user_id: uuid.UUID) -> list[Portfolio]:
+        return [p for p in self.portfolios.values() if p.user_id == user_id]
+
+    async def get(self, portfolio_id: uuid.UUID, user_id: uuid.UUID) -> Portfolio | None:
+        p = self.portfolios.get(portfolio_id)
+        if p is None or p.user_id != user_id:
+            return None
+        return p
+
+    async def add_transaction(self, portfolio_id: uuid.UUID, transaction: PortfolioTransaction) -> bool:
+        if transaction.symbol not in self.known_symbols:
+            return False
+        self.transactions.setdefault(portfolio_id, []).append(transaction)
+        return True
+
+    async def get_transactions(self, portfolio_id: uuid.UUID) -> list[PortfolioTransaction]:
+        return sorted(self.transactions.get(portfolio_id, []), key=lambda t: t.transaction_date)
+
+
+class FakeNewsProvider(NewsProviderPort):
+    def __init__(self, articles: list[NewsArticle] | None = None):
+        self.articles = articles or []
+        self.fail_with: Exception | None = None
+        self.last_known_symbols: set[str] | None = None
+
+    async def fetch_latest(self, known_symbols: set[str]) -> list[NewsArticle]:
+        self.last_known_symbols = known_symbols
+        if self.fail_with:
+            raise self.fail_with
+        return self.articles
+
+
+class FakeNewsRepository(NewsRepositoryPort):
+    def __init__(self, articles: list[NewsArticle] | None = None):
+        self.articles_by_url: dict[str, NewsArticle] = {a.url: a for a in (articles or [])}
+
+    async def bulk_upsert(self, articles: list[NewsArticle]) -> int:
+        for a in articles:
+            self.articles_by_url[a.url] = a
+        return len(articles)
+
+    async def list_latest(
+        self, category: NewsCategory | None, symbol: str | None, limit: int, offset: int
+    ) -> list[NewsArticle]:
+        articles = sorted(self.articles_by_url.values(), key=lambda a: a.published_at, reverse=True)
+        if category is not None:
+            articles = [a for a in articles if a.category == category]
+        if symbol is not None:
+            articles = [a for a in articles if symbol.strip().upper() in a.related_symbols]
+        return articles[offset : offset + limit]
+
+
+class FakeAlertRepository(AlertRepositoryPort):
+    def __init__(self, known_symbols: set[str] | None = None):
+        self.known_symbols = known_symbols or set()
+        self.alerts: dict[uuid.UUID, Alert] = {}
+
+    async def create(self, user_id: uuid.UUID, symbol: str, alert_type: AlertType, condition: dict) -> Alert | None:
+        if symbol not in self.known_symbols:
+            return None
+        alert = Alert(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            symbol=symbol,
+            alert_type=alert_type,
+            condition=condition,
+            status=AlertStatus.ACTIVE,
+            created_at=datetime.now(UTC),
+            triggered_at=None,
+        )
+        self.alerts[alert.id] = alert
+        return alert
+
+    async def list_for_user(self, user_id: uuid.UUID, status: AlertStatus | None) -> list[Alert]:
+        return [a for a in self.alerts.values() if a.user_id == user_id and (status is None or a.status == status)]
+
+    async def get(self, alert_id: uuid.UUID, user_id: uuid.UUID) -> Alert | None:
+        a = self.alerts.get(alert_id)
+        if a is None or a.user_id != user_id:
+            return None
+        return a
+
+    async def delete(self, alert_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+        a = self.alerts.get(alert_id)
+        if a is None or a.user_id != user_id:
+            return False
+        del self.alerts[alert_id]
+        return True
+
+    async def list_active(self) -> list[Alert]:
+        return [a for a in self.alerts.values() if a.status == AlertStatus.ACTIVE]
+
+    async def mark_triggered(self, alert_id: uuid.UUID, triggered_at: datetime) -> None:
+        a = self.alerts[alert_id]
+        self.alerts[alert_id] = replace(a, status=AlertStatus.TRIGGERED, triggered_at=triggered_at)
+
+
+class FakeNotificationRepository(NotificationRepositoryPort):
+    def __init__(self):
+        self.notifications: dict[uuid.UUID, Notification] = {}
+
+    async def create(self, user_id: uuid.UUID, alert_id: uuid.UUID | None, title: str, message: str) -> Notification:
+        notification = Notification(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            alert_id=alert_id,
+            title=title,
+            message=message,
+            created_at=datetime.now(UTC),
+            read_at=None,
+        )
+        self.notifications[notification.id] = notification
+        return notification
+
+    async def list_for_user(self, user_id: uuid.UUID, unread_only: bool, limit: int, offset: int) -> list[Notification]:
+        items = [
+            n for n in self.notifications.values() if n.user_id == user_id and (not unread_only or n.read_at is None)
+        ]
+        items.sort(key=lambda n: n.created_at, reverse=True)
+        return items[offset : offset + limit]
+
+    async def mark_read(self, notification_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+        n = self.notifications.get(notification_id)
+        if n is None or n.user_id != user_id:
+            return False
+        self.notifications[notification_id] = replace(n, read_at=datetime.now(UTC))
+        return True
+
+
+class FakeUserRepository(UserRepositoryPort):
+    def __init__(self, users: list[User] | None = None):
+        self.users_by_id: dict[uuid.UUID, User] = {u.id: u for u in (users or [])}
+
+    async def get_by_email(self, email: str) -> User | None:
+        email = email.strip().lower()
+        return next((u for u in self.users_by_id.values() if u.email == email), None)
+
+    async def get_by_id(self, user_id: uuid.UUID) -> User | None:
+        return self.users_by_id.get(user_id)
+
+    async def create(self, email: str, password_hash: str, display_name: str) -> User:
+        user = User(
+            id=uuid.uuid4(),
+            email=email.strip().lower(),
+            display_name=display_name,
+            password_hash=password_hash,
+            created_at=datetime.now(UTC),
+        )
+        self.users_by_id[user.id] = user
+        return user
+
+
+class FakeRefreshTokenRepository(RefreshTokenRepositoryPort):
+    def __init__(self):
+        self.tokens_by_id: dict[uuid.UUID, RefreshToken] = {}
+
+    async def create(self, user_id: uuid.UUID, token_hash: str, expires_at: datetime) -> RefreshToken:
+        token = RefreshToken(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            token_hash=token_hash,
+            expires_at=expires_at,
+            revoked_at=None,
+            created_at=datetime.now(UTC),
+        )
+        self.tokens_by_id[token.id] = token
+        return token
+
+    async def get_by_hash(self, token_hash: str) -> RefreshToken | None:
+        return next((t for t in self.tokens_by_id.values() if t.token_hash == token_hash), None)
+
+    async def revoke(self, token_id: uuid.UUID) -> None:
+        token = self.tokens_by_id.get(token_id)
+        if token is not None:
+            self.tokens_by_id[token_id] = replace(token, revoked_at=datetime.now(UTC))
 
 
 @pytest.fixture
@@ -284,7 +593,8 @@ async def db_session(postgres_url) -> AsyncSession:
     async with session_factory() as session:
         await session.execute(
             text(
-                "TRUNCATE TABLE financial_results, corporate_actions, historical_prices, stocks "
+                "TRUNCATE TABLE notifications, alerts, news_articles, portfolio_transactions, portfolios, "
+                "watchlist_items, watchlists, financial_results, corporate_actions, historical_prices, stocks "
                 "RESTART IDENTITY CASCADE"
             )
         )

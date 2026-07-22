@@ -1,5 +1,6 @@
 """Framework-agnostic domain entities. No FastAPI, no SQLAlchemy, no NSE-specific shapes."""
 
+import uuid
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
@@ -119,3 +120,160 @@ class FinancialResultRecord:
     profit: Decimal | None
     eps_basic: Decimal | None
     eps_diluted: Decimal | None
+
+
+@dataclass(frozen=True, slots=True)
+class MarketMover:
+    """One row of a gainers/losers/most-active/52-week leaderboard, derived
+    entirely from stored `historical_prices` (no live NSE call).
+    """
+
+    symbol: str
+    name: str
+    last_price: Decimal
+    change: Decimal | None
+    change_percent: Decimal | None
+    volume: int
+
+
+@dataclass(frozen=True, slots=True)
+class Watchlist:
+    id: uuid.UUID
+    user_id: uuid.UUID
+    name: str
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class WatchlistItem:
+    symbol: str
+    name: str
+    added_at: datetime
+
+
+class TransactionType(str, Enum):
+    BUY = "BUY"
+    SELL = "SELL"
+
+
+@dataclass(frozen=True, slots=True)
+class Portfolio:
+    id: uuid.UUID
+    user_id: uuid.UUID
+    name: str
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class PortfolioTransaction:
+    symbol: str
+    transaction_type: TransactionType
+    quantity: Decimal
+    price: Decimal
+    transaction_date: date
+
+
+class NewsCategory(str, Enum):
+    MARKET = "MARKET"
+    COMPANY = "COMPANY"
+    ECONOMY = "ECONOMY"
+    REGULATION = "REGULATION"
+    SECTOR = "SECTOR"
+
+
+@dataclass(frozen=True, slots=True)
+class NewsArticle:
+    headline: str
+    summary: str | None
+    source: str
+    url: str
+    category: NewsCategory
+    related_symbols: list[str]
+    published_at: datetime
+
+
+class AlertType(str, Enum):
+    PRICE_ABOVE = "PRICE_ABOVE"
+    PRICE_BELOW = "PRICE_BELOW"
+    PERCENT_CHANGE_ABOVE = "PERCENT_CHANGE_ABOVE"
+    PERCENT_CHANGE_BELOW = "PERCENT_CHANGE_BELOW"
+    RSI_ABOVE = "RSI_ABOVE"
+    RSI_BELOW = "RSI_BELOW"
+    VOLUME_SPIKE = "VOLUME_SPIKE"
+    NEW_52_WEEK_HIGH = "NEW_52_WEEK_HIGH"
+    NEW_52_WEEK_LOW = "NEW_52_WEEK_LOW"
+
+
+class AlertStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    TRIGGERED = "TRIGGERED"
+    CANCELLED = "CANCELLED"
+
+
+@dataclass(frozen=True, slots=True)
+class Alert:
+    id: uuid.UUID
+    user_id: uuid.UUID
+    symbol: str
+    alert_type: AlertType
+    condition: dict
+    status: AlertStatus
+    created_at: datetime
+    triggered_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class Notification:
+    id: uuid.UUID
+    user_id: uuid.UUID
+    alert_id: uuid.UUID | None
+    title: str
+    message: str
+    created_at: datetime
+    read_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class MarketStatus:
+    """One market segment's open/closed status, as NSE reports it (raw
+    `market`/`status` strings from NSE's own vocabulary - not normalized into
+    an enum, since NSE's own values aren't fully cataloged/stable enough to
+    trust an exhaustive enum here).
+    """
+
+    market: str
+    status: str
+    as_of: str
+
+
+@dataclass(frozen=True, slots=True)
+class IndexQuote:
+    index_name: str
+    last_price: Decimal
+    change: Decimal
+    change_percent: Decimal
+
+
+@dataclass(frozen=True, slots=True)
+class User:
+    """Only used within the auth service/repository layer - every other
+    feature (watchlists, portfolios, alerts, ...) works with a bare
+    `user_id: uuid.UUID`, never a full User, so `password_hash` being here
+    never leaks beyond auth code.
+    """
+
+    id: uuid.UUID
+    email: str
+    display_name: str
+    password_hash: str | None
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class RefreshToken:
+    id: uuid.UUID
+    user_id: uuid.UUID
+    token_hash: str
+    expires_at: datetime
+    revoked_at: datetime | None
+    created_at: datetime

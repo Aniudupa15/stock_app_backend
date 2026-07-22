@@ -109,7 +109,9 @@ def is_morning_star(opens: np.ndarray, highs: np.ndarray, lows: np.ndarray, clos
         third_bullish = closes[i] > opens[i]
         first_midpoint = (opens[i - 2] + closes[i - 2]) / 2
         closes_above_midpoint = closes[i] > first_midpoint
-        result[i] = first_bearish and first_long and star_small and star_gaps_down and third_bullish and closes_above_midpoint
+        result[i] = (
+            first_bearish and first_long and star_small and star_gaps_down and third_bullish and closes_above_midpoint
+        )
     return result
 
 

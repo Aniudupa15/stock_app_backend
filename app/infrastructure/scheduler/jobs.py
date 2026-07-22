@@ -7,14 +7,20 @@ from app.core.config import Settings
 from app.infrastructure.db.session import get_session_factory
 from app.models.financial_result import FinancialResultModel
 from app.models.stock import StockModel
+from app.providers.news.news_provider import RssNewsProvider
 from app.providers.nse.client import NseClient
 from app.providers.nse.nse_provider import NseStockDataProvider
+from app.repositories.alert_repository import SqlAlchemyAlertRepository
 from app.repositories.corporate_action_repository import SqlAlchemyCorporateActionRepository
 from app.repositories.financial_result_repository import SqlAlchemyFinancialResultRepository
 from app.repositories.historical_price_repository import SqlAlchemyHistoricalPriceRepository
+from app.repositories.news_repository import SqlAlchemyNewsRepository
+from app.repositories.notification_repository import SqlAlchemyNotificationRepository
 from app.repositories.stock_repository import SqlAlchemyStockRepository
+from app.services.alert_evaluation_service import AlertEvaluationService
 from app.services.corporate_action_service import CorporateActionService
 from app.services.financial_results_sync_service import FinancialResultsSyncService
+from app.services.news_service import NewsService
 from app.services.price_history_service import PriceHistoryService
 from app.services.universe_sync_service import UniverseSyncService
 
@@ -151,3 +157,39 @@ async def run_financial_results_sync(settings: Settings) -> None:
             )
     finally:
         await client.aclose()
+
+
+async def run_news_sync(settings: Settings) -> None:
+    """Scheduled job body: pulls the configured RSS feeds and upserts new
+    articles. Independent of NSE entirely (no NseClient needed) - a separate
+    provider vertical, see app/providers/news/.
+    """
+    provider = RssNewsProvider()
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        repository = SqlAlchemyNewsRepository(session)
+        stock_repository = SqlAlchemyStockRepository(session)
+        service = NewsService(provider, repository, stock_repository)
+        try:
+            upserted = await service.sync()
+            logger.info("Scheduled news sync succeeded: upserted=%d", upserted)
+        except Exception:
+            logger.exception("Scheduled news sync failed")
+
+
+async def run_alert_evaluation(settings: Settings) -> None:
+    """Scheduled job body: evaluates every ACTIVE alert against current
+    prices/indicators, computed straight from stored `historical_prices`
+    (no live NSE call, no NseClient needed).
+    """
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        alert_repository = SqlAlchemyAlertRepository(session)
+        notification_repository = SqlAlchemyNotificationRepository(session)
+        price_repository = SqlAlchemyHistoricalPriceRepository(session)
+        service = AlertEvaluationService(alert_repository, notification_repository, price_repository)
+        try:
+            triggered = await service.evaluate_all()
+            logger.info("Scheduled alert evaluation succeeded: triggered=%d", triggered)
+        except Exception:
+            logger.exception("Scheduled alert evaluation failed")

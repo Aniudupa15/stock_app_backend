@@ -34,10 +34,20 @@ CORPORATE_ACTIONS_PATH = "/api/corporates-corporateActions"
 # FINANCIAL_RESULT_XBRL_PATTERN below. Path per the same community reference.
 FINANCIAL_RESULTS_INDEX_PATH = "/api/corporates-financial-results"
 
-# Reserved for later phases - not called by any Phase 3 code path.
-HISTORICAL_EQUITY_PATH = "/api/historical/cm/equity"
+# Cookie-gated JSON API. Response shapes cross-referenced against well-
+# maintained community NSE clients (nsepython, BennyThadikaran/NseIndiaApi) -
+# same approach that found the real corporate-actions/financial-results paths
+# in Phase 3 - but NOT live-verified this session: this sandbox's cookie
+# bootstrap was 403/blocked when checked (2026-07-22), consistent with the
+# documented intermittent Akamai blocking (see project memory). Both methods
+# degrade gracefully like get_quote, so a wrong field name just means an
+# empty best-effort result, not a crash - but re-verify field names against
+# the live site the first time this is exercised for real.
 MARKET_STATUS_PATH = "/api/marketStatus"
 ALL_INDICES_PATH = "/api/allIndices"
+
+# Reserved for later phases - not called by any Phase 4 code path.
+HISTORICAL_EQUITY_PATH = "/api/historical/cm/equity"
 LIVE_ANALYSIS_GAINERS_PATH = "/api/live-analysis-variations"  # ?index=gainers
 LIVE_ANALYSIS_LOSERS_PATH = "/api/live-analysis-variations"  # ?index=loosers (NSE's own misspelling)
 CORPORATE_ANNOUNCEMENTS_PATH = "/api/corporate-announcements"

@@ -8,12 +8,20 @@ from app.domain.entities import (
     CorporateAction,
     FinancialResultFiling,
     FinancialResultRecord,
+    IndexQuote,
+    MarketStatus,
     Quote,
     StockMasterRecord,
 )
 from app.domain.ports import StockDataProviderPort
 from app.providers.nse.client import NseClient
-from app.providers.nse.endpoints import CORPORATE_ACTIONS_PATH, FINANCIAL_RESULTS_INDEX_PATH, QUOTE_EQUITY_PATH
+from app.providers.nse.endpoints import (
+    ALL_INDICES_PATH,
+    CORPORATE_ACTIONS_PATH,
+    FINANCIAL_RESULTS_INDEX_PATH,
+    MARKET_STATUS_PATH,
+    QUOTE_EQUITY_PATH,
+)
 from app.providers.nse.exceptions import NseError, NseNotFoundError
 from app.providers.nse.xbrl import select_quarterly_context
 
@@ -279,3 +287,48 @@ class NseStockDataProvider(StockDataProviderPort):
             eps_basic=eps_basic,
             eps_diluted=eps_diluted,
         )
+
+    async def fetch_market_status(self) -> list[MarketStatus]:
+        try:
+            data = await self._client.get_json(MARKET_STATUS_PATH)
+        except NseError as exc:
+            raise ProviderUnavailableError("NSE", str(exc)) from exc
+
+        rows = data.get("marketState") if isinstance(data, dict) else None
+        if rows is None:
+            raise ProviderUnavailableError("NSE", "market-status response had an unexpected shape")
+
+        statuses: list[MarketStatus] = []
+        for row in rows:
+            market = (row.get("market") or "").strip()
+            status = (row.get("marketStatus") or "").strip()
+            if not market or not status:
+                continue
+            statuses.append(MarketStatus(market=market, status=status, as_of=(row.get("tradeDate") or "").strip()))
+        return statuses
+
+    async def fetch_indices(self) -> list[IndexQuote]:
+        try:
+            data = await self._client.get_json(ALL_INDICES_PATH)
+        except NseError as exc:
+            raise ProviderUnavailableError("NSE", str(exc)) from exc
+
+        rows = data.get("data") if isinstance(data, dict) else None
+        if rows is None:
+            raise ProviderUnavailableError("NSE", "all-indices response had an unexpected shape")
+
+        indices: list[IndexQuote] = []
+        for row in rows:
+            name = (row.get("indexSymbol") or row.get("index") or "").strip()
+            last_price = _to_decimal(row.get("last"))
+            if not name or last_price is None:
+                continue
+            indices.append(
+                IndexQuote(
+                    index_name=name,
+                    last_price=last_price,
+                    change=_to_decimal(row.get("variation")) or Decimal("0"),
+                    change_percent=_to_decimal(row.get("percentChange")) or Decimal("0"),
+                )
+            )
+        return indices

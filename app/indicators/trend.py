@@ -103,10 +103,14 @@ def supertrend(
             continue
 
         final_upper[i] = (
-            upper_band[i] if (upper_band[i] < final_upper[i - 1] or closes[i - 1] > final_upper[i - 1]) else final_upper[i - 1]
+            upper_band[i]
+            if (upper_band[i] < final_upper[i - 1] or closes[i - 1] > final_upper[i - 1])
+            else final_upper[i - 1]
         )
         final_lower[i] = (
-            lower_band[i] if (lower_band[i] > final_lower[i - 1] or closes[i - 1] < final_lower[i - 1]) else final_lower[i - 1]
+            lower_band[i]
+            if (lower_band[i] > final_lower[i - 1] or closes[i - 1] < final_lower[i - 1])
+            else final_lower[i - 1]
         )
 
         if closes[i] > final_upper[i - 1]:

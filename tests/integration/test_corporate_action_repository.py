@@ -11,7 +11,11 @@ pytestmark = requires_docker
 async def _seed_stock(db_session, symbol: str) -> None:
     stock_repo = SqlAlchemyStockRepository(db_session)
     await stock_repo.upsert_universe(
-        [StockMasterRecord(symbol=symbol, isin=None, name=f"{symbol} Ltd", series="EQ", listing_date=None, face_value=None)]
+        [
+            StockMasterRecord(
+                symbol=symbol, isin=None, name=f"{symbol} Ltd", series="EQ", listing_date=None, face_value=None
+            )
+        ]
     )
     await db_session.commit()
 

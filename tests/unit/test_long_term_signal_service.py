@@ -57,7 +57,12 @@ async def test_get_signal_raises_when_stock_unknown():
     stock_repo = FakeStockRepository()
     service = LongTermSignalService(
         stock_repo,
-        FundamentalsService(stock_repo, FakeFinancialResultRepository(), FakeHistoricalPriceRepository(), FakeCorporateActionRepository()),
+        FundamentalsService(
+            stock_repo,
+            FakeFinancialResultRepository(),
+            FakeHistoricalPriceRepository(),
+            FakeCorporateActionRepository(),
+        ),
     )
     with pytest.raises(StockNotFoundError):
         await service.get_signal("DOESNOTEXIST")

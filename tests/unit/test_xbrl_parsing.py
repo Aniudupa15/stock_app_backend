@@ -1,8 +1,6 @@
 from datetime import date
 from decimal import Decimal
 
-import pytest
-
 from app.providers.nse.xbrl import parse_xbrl_document, select_quarterly_context
 
 # A minimal but structurally real in-bse-fin XBRL instance: two duration

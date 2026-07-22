@@ -10,7 +10,11 @@ async def test_history_returns_bars_within_range(app_client, db_session):
     client, _ = app_client
     stock_repo = SqlAlchemyStockRepository(db_session)
     await stock_repo.upsert_universe(
-        [StockMasterRecord(symbol="RELIANCE", isin=None, name="Reliance", series="EQ", listing_date=None, face_value=None)]
+        [
+            StockMasterRecord(
+                symbol="RELIANCE", isin=None, name="Reliance", series="EQ", listing_date=None, face_value=None
+            )
+        ]
     )
     await db_session.commit()
 

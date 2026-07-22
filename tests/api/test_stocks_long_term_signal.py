@@ -14,7 +14,11 @@ async def test_long_term_signal_unknown_symbol_returns_404(app_client):
 async def test_long_term_signal_has_data_false_with_no_financial_results(app_client, db_session):
     stock_repo = SqlAlchemyStockRepository(db_session)
     await stock_repo.upsert_universe(
-        [StockMasterRecord(symbol="HDFCBANK", isin=None, name="HDFC Bank", series="EQ", listing_date=None, face_value=None)]
+        [
+            StockMasterRecord(
+                symbol="HDFCBANK", isin=None, name="HDFC Bank", series="EQ", listing_date=None, face_value=None
+            )
+        ]
     )
     await db_session.commit()
 
@@ -31,7 +35,11 @@ async def test_long_term_signal_has_data_false_with_no_financial_results(app_cli
 async def test_long_term_signal_buy_with_strong_growth(app_client, db_session):
     stock_repo = SqlAlchemyStockRepository(db_session)
     await stock_repo.upsert_universe(
-        [StockMasterRecord(symbol="RELIANCE", isin=None, name="Reliance", series="EQ", listing_date=None, face_value=None)]
+        [
+            StockMasterRecord(
+                symbol="RELIANCE", isin=None, name="Reliance", series="EQ", listing_date=None, face_value=None
+            )
+        ]
     )
     await db_session.commit()
 

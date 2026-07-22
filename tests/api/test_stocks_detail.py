@@ -40,7 +40,12 @@ async def test_detail_degrades_gracefully_when_nse_unavailable(app_client, db_se
     await repo.upsert_universe(
         [
             StockMasterRecord(
-                symbol="TCS", isin=None, name="Tata Consultancy Services", series="EQ", listing_date=None, face_value=None
+                symbol="TCS",
+                isin=None,
+                name="Tata Consultancy Services",
+                series="EQ",
+                listing_date=None,
+                face_value=None,
             )
         ]
     )

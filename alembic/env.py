@@ -4,11 +4,10 @@ from logging.config import fileConfig
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+import app.models  # noqa: F401 - registers every model on Base.metadata
 from alembic import context
-
 from app.core.config import get_settings
 from app.models.base import Base
-from app.models import stock, historical_price, corporate_action, financial_result  # noqa: F401 - registers models on Base.metadata
 
 config = context.config
 config.set_main_option("sqlalchemy.url", get_settings().DATABASE_URL)
