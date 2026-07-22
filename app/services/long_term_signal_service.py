@@ -115,7 +115,9 @@ class LongTermSignalService:
             risk_level = "Low"
 
         if not strengths and not weaknesses:
-            reasoning.append("Insufficient growth signal to form a strong view - treat this as a HOLD pending more data.")
+            reasoning.append(
+                "Insufficient growth signal to form a strong view - treat this as a HOLD pending more data."
+            )
 
         return LongTermSignalOut(
             symbol=symbol,

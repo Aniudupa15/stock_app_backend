@@ -24,6 +24,8 @@ class FinancialResultModel(Base, TimestampMixin):
     eps_diluted: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("stock_id", "period_end", "consolidated", name="uq_financial_results_stock_period_consolidated"),
+        UniqueConstraint(
+            "stock_id", "period_end", "consolidated", name="uq_financial_results_stock_period_consolidated"
+        ),
         Index("ix_financial_results_stock_id", "stock_id"),
     )

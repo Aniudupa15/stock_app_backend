@@ -25,8 +25,18 @@ class Settings(BaseSettings):
     NSE_CIRCUIT_RESET_TIMEOUT_SECONDS: int = 60
 
     # Cache
+    CACHE_BACKEND: str = "memory"  # "memory" or "redis"
+    REDIS_URL: str = "redis://localhost:6379/0"
     CACHE_SEARCH_TTL_SECONDS: int = 60
     CACHE_QUOTE_TTL_SECONDS: int = 15
+    CACHE_DASHBOARD_TTL_SECONDS: int = 30
+
+    # Auth
+    # Dev-only placeholder - MUST be overridden via .env in any real deployment.
+    JWT_SECRET_KEY: str = "dev-only-insecure-secret-change-me"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
     # Scheduler
     SCHEDULER_ENABLED: bool = True
@@ -38,6 +48,8 @@ class Settings(BaseSettings):
     CORPORATE_ACTIONS_SYNC_MINUTE_IST: int = 30
     FINANCIAL_RESULTS_SYNC_HOUR_IST: int = 9
     FINANCIAL_RESULTS_SYNC_MINUTE_IST: int = 0
+    NEWS_SYNC_INTERVAL_MINUTES: int = 30
+    ALERT_EVALUATION_INTERVAL_MINUTES: int = 15
 
     @property
     def cors_origins_list(self) -> list[str]:

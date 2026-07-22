@@ -6,6 +6,7 @@ from app.api.deps import (
     get_indicator_service,
     get_intraday_signal_service,
     get_long_term_signal_service,
+    get_news_service,
     get_price_history_service,
     get_stock_service,
 )
@@ -15,12 +16,14 @@ from app.schemas.history import HistoryOut
 from app.schemas.indicators import IndicatorsOut
 from app.schemas.intraday_signal import IntradaySignalOut
 from app.schemas.long_term_signal import LongTermSignalOut
+from app.schemas.news import NewsArticleOut
 from app.schemas.stock import StockDetail, StockSearchResult
 from app.services.corporate_action_service import CorporateActionService
 from app.services.fundamentals_service import FundamentalsService
 from app.services.indicator_service import IndicatorService
 from app.services.intraday_signal_service import IntradaySignalService
 from app.services.long_term_signal_service import LongTermSignalService
+from app.services.news_service import NewsService
 from app.services.price_history_service import PriceHistoryService
 from app.services.stock_service import StockService
 
@@ -93,3 +96,11 @@ async def get_stock_long_term_signal(
     service: LongTermSignalService = Depends(get_long_term_signal_service),
 ) -> LongTermSignalOut:
     return await service.get_signal(symbol)
+
+
+@router.get("/{symbol}/news", response_model=list[NewsArticleOut])
+async def get_stock_news(
+    symbol: str,
+    service: NewsService = Depends(get_news_service),
+) -> list[NewsArticleOut]:
+    return await service.get_for_symbol(symbol)

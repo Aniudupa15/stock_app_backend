@@ -11,7 +11,12 @@ async def test_search_returns_db_backed_results(app_client, db_session):
     await repo.upsert_universe(
         [
             StockMasterRecord(
-                symbol="WIPRO", isin=None, name="Wipro Limited", series="EQ", listing_date=date(1946, 1, 1), face_value=Decimal("2.00")
+                symbol="WIPRO",
+                isin=None,
+                name="Wipro Limited",
+                series="EQ",
+                listing_date=date(1946, 1, 1),
+                face_value=Decimal("2.00"),
             )
         ]
     )

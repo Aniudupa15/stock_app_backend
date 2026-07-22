@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 
 from app.core.exceptions import StockNotFoundError
-from app.domain.entities import BhavcopyRecord, CorporateAction, FinancialResultRecord, OhlcvBar
+from app.domain.entities import BhavcopyRecord, CorporateAction, FinancialResultRecord
 from app.services.fundamentals_service import FundamentalsService, _sum_dividend_amount
 from tests.conftest import (
     FakeCorporateActionRepository,
@@ -14,7 +14,9 @@ from tests.conftest import (
 )
 
 
-def _quarter(period_end: date, revenue: str, profit: str, eps: str, consolidated: bool = False) -> FinancialResultRecord:
+def _quarter(
+    period_end: date, revenue: str, profit: str, eps: str, consolidated: bool = False
+) -> FinancialResultRecord:
     return FinancialResultRecord(
         symbol="RELIANCE",
         period_start=date(period_end.year, 1, 1),
@@ -42,7 +44,10 @@ def test_sum_dividend_amount(purpose, expected):
 
 async def test_get_fundamentals_raises_when_stock_unknown():
     service = FundamentalsService(
-        FakeStockRepository(), FakeFinancialResultRepository(), FakeHistoricalPriceRepository(), FakeCorporateActionRepository()
+        FakeStockRepository(),
+        FakeFinancialResultRepository(),
+        FakeHistoricalPriceRepository(),
+        FakeCorporateActionRepository(),
     )
     with pytest.raises(StockNotFoundError):
         await service.get_fundamentals("DOESNOTEXIST")
@@ -70,7 +75,10 @@ async def test_growth_rates_computed_from_comparable_quarters(sample_stock):
     ]
     financial_repo = FakeFinancialResultRepository({"RELIANCE": quarters})
     service = FundamentalsService(
-        FakeStockRepository([sample_stock]), financial_repo, FakeHistoricalPriceRepository(), FakeCorporateActionRepository()
+        FakeStockRepository([sample_stock]),
+        financial_repo,
+        FakeHistoricalPriceRepository(),
+        FakeCorporateActionRepository(),
     )
 
     result = await service.get_fundamentals("RELIANCE")
@@ -187,7 +195,10 @@ async def test_fundamentals_never_populates_unavailable_metrics(sample_stock):
     quarters = [_quarter(date(2024, 12, 31), "1000", "100", "5.0")]
     financial_repo = FakeFinancialResultRepository({"RELIANCE": quarters})
     service = FundamentalsService(
-        FakeStockRepository([sample_stock]), financial_repo, FakeHistoricalPriceRepository(), FakeCorporateActionRepository()
+        FakeStockRepository([sample_stock]),
+        financial_repo,
+        FakeHistoricalPriceRepository(),
+        FakeCorporateActionRepository(),
     )
 
     result = await service.get_fundamentals("RELIANCE")

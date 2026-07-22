@@ -3,9 +3,10 @@ import pytest
 import respx
 
 from app.core.config import Settings
-from app.providers.nse.circuit_breaker import CircuitOpenError
+from app.core.exceptions import ProviderUnavailableError
 from app.providers.nse.client import NseClient
-from app.providers.nse.exceptions import NseServerError, NseTimeoutError
+from app.providers.nse.exceptions import NseNotFoundError, NseServerError, NseTimeoutError
+from app.providers.nse.nse_provider import NseStockDataProvider
 
 HOMEPAGE = "https://www.nseindia.com/"
 QUOTE_URL = "https://www.nseindia.com/api/quote-equity"
@@ -129,7 +130,7 @@ async def test_404_is_not_retried():
 
     client = NseClient(settings)
     try:
-        with pytest.raises(Exception):
+        with pytest.raises(NseNotFoundError):
             await client.get_json("/api/quote-equity", params={"symbol": "NOPE"})
     finally:
         await client.aclose()
@@ -153,6 +154,13 @@ async def test_timeout_raises_typed_exception(settings):
 
 @respx.mock
 async def test_circuit_breaker_opens_after_repeated_failures(settings):
+    """Regression test: an open breaker must still surface as `NseServerError`
+    (a typed NseError), not the breaker's own `CircuitOpenError` - the latter
+    isn't an NseError subclass, so it used to bypass nse_provider.py's
+    `except NseError` translation entirely and leak as an unhandled 500 all
+    the way to the API response (found via load testing - concurrent traffic
+    trips the breaker in a way single manual requests never did).
+    """
     settings = settings.model_copy(update={"NSE_CIRCUIT_FAIL_MAX": 2, "NSE_MAX_RETRIES": 1})
     _mock_homepage()
     respx.get(QUOTE_URL).mock(return_value=httpx.Response(500))
@@ -163,7 +171,31 @@ async def test_circuit_breaker_opens_after_repeated_failures(settings):
             with pytest.raises(NseServerError):
                 await client.get_json("/api/quote-equity", params={"symbol": "TCS"})
 
-        with pytest.raises(CircuitOpenError):
+        with pytest.raises(NseServerError):
             await client.get_json("/api/quote-equity", params={"symbol": "TCS"})
+    finally:
+        await client.aclose()
+
+
+@respx.mock
+async def test_open_circuit_degrades_gracefully_through_the_full_provider_chain(settings):
+    """Same regression, exercised end-to-end through NseStockDataProvider -
+    confirms an open breaker ultimately surfaces as ProviderUnavailableError
+    (which StockService already knows how to degrade gracefully from), not
+    an unhandled 500.
+    """
+    settings = settings.model_copy(update={"NSE_CIRCUIT_FAIL_MAX": 1, "NSE_MAX_RETRIES": 1})
+    _mock_homepage()
+    respx.get(QUOTE_URL).mock(return_value=httpx.Response(500))
+
+    client = NseClient(settings)
+    try:
+        provider = NseStockDataProvider(client)
+
+        with pytest.raises(ProviderUnavailableError):
+            await provider.get_quote("TCS")  # trips the breaker open
+
+        with pytest.raises(ProviderUnavailableError):
+            await provider.get_quote("TCS")  # breaker now open
     finally:
         await client.aclose()

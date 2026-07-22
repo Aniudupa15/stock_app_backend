@@ -3,6 +3,7 @@ import logging
 from app.core.config import Settings
 from app.core.exceptions import ProviderUnavailableError, StockNotFoundError
 from app.domain.ports import CachePort, StockDataProviderPort, StockRepositoryPort
+from app.schemas.market_status import IndexQuoteOut, MarketStatusOut
 from app.schemas.stock import QuoteOut, StockDetail, StockSearchResult
 
 logger = logging.getLogger(__name__)
@@ -93,3 +94,31 @@ class StockService:
             quote=quote_out,
             quote_unavailable_reason=quote_unavailable_reason,
         )
+
+    async def get_market_status(self) -> list[MarketStatusOut]:
+        """Best-effort - returns an empty list (not an error) if NSE's
+        cookie-gated status endpoint is unreachable, same graceful-degradation
+        shape as `get_detail`'s quote lookup.
+        """
+        try:
+            statuses = await self._provider.fetch_market_status()
+        except ProviderUnavailableError as exc:
+            logger.warning("Market status unavailable: %s", exc)
+            return []
+        return [MarketStatusOut(market=s.market, status=s.status, as_of=s.as_of) for s in statuses]
+
+    async def get_indices(self) -> list[IndexQuoteOut]:
+        """Best-effort - returns an empty list (not an error) if NSE's
+        cookie-gated indices endpoint is unreachable.
+        """
+        try:
+            indices = await self._provider.fetch_indices()
+        except ProviderUnavailableError as exc:
+            logger.warning("Indices unavailable: %s", exc)
+            return []
+        return [
+            IndexQuoteOut(
+                index_name=i.index_name, last_price=i.last_price, change=i.change, change_percent=i.change_percent
+            )
+            for i in indices
+        ]

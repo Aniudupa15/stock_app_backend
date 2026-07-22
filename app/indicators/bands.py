@@ -3,7 +3,9 @@ import numpy as np
 from app.indicators.moving_averages import sma
 
 
-def bollinger_bands(closes: np.ndarray, period: int = 20, num_std: float = 2.0) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def bollinger_bands(
+    closes: np.ndarray, period: int = 20, num_std: float = 2.0
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Returns (upper, middle, lower) bands. Middle is the SMA; upper/lower
     are `num_std` rolling standard deviations away from it.
     """

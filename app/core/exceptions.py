@@ -11,6 +11,46 @@ class StockNotFoundError(AppError):
         super().__init__(f"Stock '{symbol}' not found")
 
 
+class WatchlistNotFoundError(AppError):
+    def __init__(self, watchlist_id):
+        self.watchlist_id = watchlist_id
+        super().__init__(f"Watchlist '{watchlist_id}' not found")
+
+
+class PortfolioNotFoundError(AppError):
+    def __init__(self, portfolio_id):
+        self.portfolio_id = portfolio_id
+        super().__init__(f"Portfolio '{portfolio_id}' not found")
+
+
+class AlertNotFoundError(AppError):
+    def __init__(self, alert_id):
+        self.alert_id = alert_id
+        super().__init__(f"Alert '{alert_id}' not found")
+
+
+class NotificationNotFoundError(AppError):
+    def __init__(self, notification_id):
+        self.notification_id = notification_id
+        super().__init__(f"Notification '{notification_id}' not found")
+
+
+class EmailAlreadyRegisteredError(AppError):
+    def __init__(self, email: str):
+        self.email = email
+        super().__init__(f"Email '{email}' is already registered")
+
+
+class InvalidCredentialsError(AppError):
+    def __init__(self):
+        super().__init__("Invalid email or password")
+
+
+class InvalidRefreshTokenError(AppError):
+    def __init__(self):
+        super().__init__("Invalid or expired refresh token")
+
+
 class ProviderUnavailableError(AppError):
     """Raised when an upstream data provider (e.g. NSE) cannot serve a request.
 

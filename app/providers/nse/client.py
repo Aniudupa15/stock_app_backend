@@ -24,7 +24,7 @@ from aiolimiter import AsyncLimiter
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.core.config import Settings
-from app.providers.nse.circuit_breaker import AsyncCircuitBreaker
+from app.providers.nse.circuit_breaker import AsyncCircuitBreaker, CircuitOpenError
 from app.providers.nse.endpoints import BHAVCOPY_ZIP_URL_TEMPLATE, EQUITY_LIST_CSV_URL
 from app.providers.nse.exceptions import (
     NseAuthExpiredError,
@@ -148,7 +148,16 @@ class NseClient:
             reraise=True,
         )(self._get_json_once)
 
-        return await self._breaker.call(retrying, path, params)
+        try:
+            return await self._breaker.call(retrying, path, params)
+        except CircuitOpenError as exc:
+            # CircuitOpenError is a plain Exception, not an NseError subclass
+            # (the breaker is generic, has no NSE-specific knowledge) -
+            # translate it here so every caller's `except NseError` (and,
+            # downstream, nse_provider.py's translation to
+            # ProviderUnavailableError) catches this the same as any other
+            # NSE failure, instead of it leaking as an unhandled 500.
+            raise NseServerError(path, 0) from exc
 
     async def _fetch_static_file_once(self, url: str, label: str) -> bytes:
         try:
@@ -177,7 +186,10 @@ class NseClient:
             reraise=True,
         )(self._fetch_static_file_once)
 
-        return await self._breaker.call(retrying, url, label)
+        try:
+            return await self._breaker.call(retrying, url, label)
+        except CircuitOpenError as exc:
+            raise NseServerError(label, 0) from exc
 
     @staticmethod
     def _parse_csv_rows(text: str) -> list[dict[str, str]]:

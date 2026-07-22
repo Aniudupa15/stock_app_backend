@@ -34,7 +34,11 @@ async def test_fundamentals_has_data_false_with_no_financial_results(app_client,
 async def test_fundamentals_returns_real_data_when_quarters_stored(app_client, db_session):
     stock_repo = SqlAlchemyStockRepository(db_session)
     await stock_repo.upsert_universe(
-        [StockMasterRecord(symbol="RELIANCE", isin=None, name="Reliance", series="EQ", listing_date=None, face_value=None)]
+        [
+            StockMasterRecord(
+                symbol="RELIANCE", isin=None, name="Reliance", series="EQ", listing_date=None, face_value=None
+            )
+        ]
     )
     await db_session.commit()
 

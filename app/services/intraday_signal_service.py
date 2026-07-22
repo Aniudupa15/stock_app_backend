@@ -61,7 +61,10 @@ def _score_bollinger(close: float, upper: float | None, lower: float | None) -> 
     if close <= lower:
         return 1, f"Price ({close:.2f}) is at/below the lower Bollinger Band ({lower:.2f}) - potential oversold bounce."
     if close >= upper:
-        return -1, f"Price ({close:.2f}) is at/above the upper Bollinger Band ({upper:.2f}) - potential overbought reversal."
+        return (
+            -1,
+            f"Price ({close:.2f}) is at/above the upper Bollinger Band ({upper:.2f}) - potential overbought reversal.",
+        )
     return 0, None
 
 
@@ -193,7 +196,9 @@ class IntradaySignalService:
         if signal != "HOLD" and atr_val:
             entry_price = last_close
             resistances = sorted(lvl.price for lvl in levels if lvl.kind == "resistance" and lvl.price > last_close)
-            supports = sorted((lvl.price for lvl in levels if lvl.kind == "support" and lvl.price < last_close), reverse=True)
+            supports = sorted(
+                (lvl.price for lvl in levels if lvl.kind == "support" and lvl.price < last_close), reverse=True
+            )
 
             # ATR-based fallback targets a 2:1 reward:risk by design. A support/
             # resistance level is only preferred over that fallback if it falls
@@ -209,9 +214,7 @@ class IntradaySignalService:
                     (r for r in resistances if last_close + 0.5 * atr_val <= r <= atr_target_buy), None
                 )
                 target_price = candidate_resistance if candidate_resistance else atr_target_buy
-                candidate_support = next(
-                    (s for s in supports if atr_stop_buy <= s <= last_close - 0.3 * atr_val), None
-                )
+                candidate_support = next((s for s in supports if atr_stop_buy <= s <= last_close - 0.3 * atr_val), None)
                 stop_loss = candidate_support if candidate_support else atr_stop_buy
             else:  # SELL
                 candidate_support = next(

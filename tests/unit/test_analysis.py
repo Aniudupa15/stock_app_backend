@@ -9,7 +9,12 @@ from app.analysis.candlestick import (
     is_morning_star,
     is_shooting_star,
 )
-from app.analysis.levels import detect_breakout_or_breakdown, find_swing_highs, find_swing_lows, support_resistance_levels
+from app.analysis.levels import (
+    detect_breakout_or_breakdown,
+    find_swing_highs,
+    find_swing_lows,
+    support_resistance_levels,
+)
 from app.analysis.trend import analyze_gap, classify_trend
 
 

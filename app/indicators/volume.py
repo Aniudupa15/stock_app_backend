@@ -45,7 +45,7 @@ def volume_profile(
     bin_volumes = np.zeros(num_bins)
     typical = (highs + lows + closes) / 3
     bin_indices = np.clip(np.digitize(typical, edges) - 1, 0, num_bins - 1)
-    for idx, vol in zip(bin_indices, volumes):
+    for idx, vol in zip(bin_indices, volumes, strict=False):
         bin_volumes[idx] += vol
 
     return [

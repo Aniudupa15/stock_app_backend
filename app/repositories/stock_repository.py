@@ -29,9 +29,7 @@ class SqlAlchemyStockRepository(StockRepositoryPort):
         self._session = session
 
     async def get_by_symbol(self, symbol: str) -> Stock | None:
-        stmt = select(StockModel).where(
-            StockModel.symbol == symbol.strip().upper(), StockModel.is_active.is_(True)
-        )
+        stmt = select(StockModel).where(StockModel.symbol == symbol.strip().upper(), StockModel.is_active.is_(True))
         result = await self._session.execute(stmt)
         row = result.scalar_one_or_none()
         return _to_entity(row) if row else None
@@ -122,3 +120,8 @@ class SqlAlchemyStockRepository(StockRepositoryPort):
         result = await self._session.execute(stmt)
         await self._session.commit()
         return result.rowcount or 0
+
+    async def list_active_symbols(self) -> list[str]:
+        stmt = select(StockModel.symbol).where(StockModel.is_active.is_(True))
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
