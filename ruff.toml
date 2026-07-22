@@ -1,0 +1,15 @@
+target-version = "py312"
+line-length = 120
+
+[lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort (import sorting)
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+]
+ignore = [
+    "E501",  # line length is a formatter concern, not a lint failure
+    "B008",  # FastAPI's own idiom is `param: X = Depends(get_x)` - not a real bug here
+]
