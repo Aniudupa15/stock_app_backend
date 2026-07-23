@@ -51,6 +51,17 @@ class InvalidRefreshTokenError(AppError):
         super().__init__("Invalid or expired refresh token")
 
 
+class UserNotFoundError(AppError):
+    """Should only happen if a valid JWT outlives its user somehow - there's
+    no delete-user operation in this API, so this is a defensive guard, not
+    an expected path.
+    """
+
+    def __init__(self, user_id):
+        self.user_id = user_id
+        super().__init__(f"User '{user_id}' not found")
+
+
 class ProviderUnavailableError(AppError):
     """Raised when an upstream data provider (e.g. NSE) cannot serve a request.
 

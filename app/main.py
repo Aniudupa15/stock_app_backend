@@ -19,6 +19,7 @@ from app.core.exceptions import (
     PortfolioNotFoundError,
     ProviderUnavailableError,
     StockNotFoundError,
+    UserNotFoundError,
     WatchlistNotFoundError,
 )
 from app.core.logging import configure_logging
@@ -94,6 +95,10 @@ def create_app() -> FastAPI:
     @app.exception_handler(InvalidRefreshTokenError)
     async def _invalid_refresh_token_handler(request: Request, exc: InvalidRefreshTokenError) -> JSONResponse:
         return JSONResponse(status_code=401, content={"detail": str(exc)}, headers={"WWW-Authenticate": "Bearer"})
+
+    @app.exception_handler(UserNotFoundError)
+    async def _user_not_found_handler(request: Request, exc: UserNotFoundError) -> JSONResponse:
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
 
     app.include_router(v1_router, prefix="/api/v1")
 

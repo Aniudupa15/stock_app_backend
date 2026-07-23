@@ -19,6 +19,7 @@ from app.domain.entities import (
     FinancialResultFiling,
     FinancialResultRecord,
     IndexQuote,
+    IpoFiling,
     MarketMover,
     MarketStatus,
     NewsArticle,
@@ -29,7 +30,10 @@ from app.domain.entities import (
     PortfolioTransaction,
     Quote,
     RefreshToken,
+    ScreenerFilters,
+    SearchHistoryEntry,
     Stock,
+    StockIndicatorSnapshot,
     StockMasterRecord,
     User,
     Watchlist,
@@ -95,6 +99,14 @@ class StockDataProviderPort(ABC):
         """Best-effort - cookie-gated, same reliability class as get_quote.
         Raises ProviderUnavailableError on failure; callers should degrade
         gracefully rather than fail the whole request.
+        """
+
+    @abstractmethod
+    async def fetch_ipo_filings(self) -> list[IpoFiling]:
+        """Merges two NSE endpoints (active/upcoming issues + already-listed
+        past issues) into one list. Best-effort per sub-endpoint - if one of
+        the two fails, still returns whatever the other one gave; only
+        raises ProviderUnavailableError if both fail.
         """
 
 
@@ -352,6 +364,14 @@ class UserRepositoryPort(ABC):
     @abstractmethod
     async def create(self, email: str, password_hash: str, display_name: str) -> User: ...
 
+    @abstractmethod
+    async def update(self, user_id: uuid.UUID, display_name: str | None, email: str | None) -> User:
+        """Partial update - only the non-None fields are changed. Callers
+        must have already confirmed `user_id` exists (e.g. via a JWT) and,
+        if changing email, that the new email isn't already taken by a
+        different user - this method assumes both are already validated.
+        """
+
 
 class RefreshTokenRepositoryPort(ABC):
     """Persistence for `refresh_tokens`. Tokens are looked up and revoked by
@@ -366,6 +386,56 @@ class RefreshTokenRepositoryPort(ABC):
 
     @abstractmethod
     async def revoke(self, token_id: uuid.UUID) -> None: ...
+
+
+class SearchHistoryRepositoryPort(ABC):
+    """Persistence for `search_history`. Logging is best-effort from the
+    caller's side (a failure here must never break a search) - this port
+    itself just does the write/read/delete, the "never fail the search"
+    guarantee lives in the service that calls it.
+    """
+
+    @abstractmethod
+    async def log(self, user_id: uuid.UUID, query: str) -> None: ...
+
+    @abstractmethod
+    async def list_for_user(self, user_id: uuid.UUID, limit: int, offset: int) -> list[SearchHistoryEntry]:
+        """Most recent first."""
+
+    @abstractmethod
+    async def clear_for_user(self, user_id: uuid.UUID) -> int:
+        """Returns the number of rows deleted."""
+
+
+class ScreenerRepositoryPort(ABC):
+    """Persistence for `stock_indicator_snapshots` - written by the daily
+    snapshot sync job, read by the screener. Unlike every other repository
+    in this app, there's no live/on-demand computation path: filtering
+    happens entirely against yesterday's materialized snapshot.
+    """
+
+    @abstractmethod
+    async def bulk_upsert(self, snapshots: list[StockIndicatorSnapshot]) -> int:
+        """One row per stock (unique on stock_id) - each sync run overwrites
+        the previous day's values rather than accumulating history.
+        """
+
+    @abstractmethod
+    async def screen(self, filters: ScreenerFilters, limit: int) -> list[StockIndicatorSnapshot]: ...
+
+
+class IpoRepositoryPort(ABC):
+    """Persistence for `ipo_filings`, unique on `symbol` - a sync run
+    overwrites a company's row in place (e.g. Active -> Listed) rather than
+    accumulating a new row per status change.
+    """
+
+    @abstractmethod
+    async def bulk_upsert(self, filings: list[IpoFiling]) -> int: ...
+
+    @abstractmethod
+    async def list_all(self, status: str | None, limit: int, offset: int) -> list[IpoFiling]:
+        """Most recently synced first."""
 
 
 class CachePort(ABC):

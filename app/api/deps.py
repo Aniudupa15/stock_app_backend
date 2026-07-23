@@ -12,12 +12,15 @@ from app.domain.ports import (
     CorporateActionRepositoryPort,
     FinancialResultRepositoryPort,
     HistoricalPriceRepositoryPort,
+    IpoRepositoryPort,
     MarketMoverRepositoryPort,
     NewsProviderPort,
     NewsRepositoryPort,
     NotificationRepositoryPort,
     PortfolioRepositoryPort,
     RefreshTokenRepositoryPort,
+    ScreenerRepositoryPort,
+    SearchHistoryRepositoryPort,
     StockDataProviderPort,
     StockRepositoryPort,
     UserRepositoryPort,
@@ -31,27 +34,35 @@ from app.repositories.alert_repository import SqlAlchemyAlertRepository
 from app.repositories.corporate_action_repository import SqlAlchemyCorporateActionRepository
 from app.repositories.financial_result_repository import SqlAlchemyFinancialResultRepository
 from app.repositories.historical_price_repository import SqlAlchemyHistoricalPriceRepository
+from app.repositories.ipo_repository import SqlAlchemyIpoRepository
 from app.repositories.market_mover_repository import SqlAlchemyMarketMoverRepository
 from app.repositories.news_repository import SqlAlchemyNewsRepository
 from app.repositories.notification_repository import SqlAlchemyNotificationRepository
 from app.repositories.portfolio_repository import SqlAlchemyPortfolioRepository
 from app.repositories.refresh_token_repository import SqlAlchemyRefreshTokenRepository
+from app.repositories.screener_repository import SqlAlchemyScreenerRepository
+from app.repositories.search_history_repository import SqlAlchemySearchHistoryRepository
 from app.repositories.stock_repository import SqlAlchemyStockRepository
 from app.repositories.user_repository import SqlAlchemyUserRepository
 from app.repositories.watchlist_repository import SqlAlchemyWatchlistRepository
 from app.services.alert_service import AlertService
 from app.services.auth_service import AuthService
+from app.services.chat_service import ChatService
+from app.services.comparison_service import ComparisonService
 from app.services.corporate_action_service import CorporateActionService
 from app.services.dashboard_service import DashboardService
 from app.services.fundamentals_service import FundamentalsService
 from app.services.indicator_service import IndicatorService
 from app.services.intraday_signal_service import IntradaySignalService
+from app.services.ipo_service import IpoService
 from app.services.long_term_signal_service import LongTermSignalService
 from app.services.market_mover_service import MarketMoverService
 from app.services.news_service import NewsService
 from app.services.notification_service import NotificationService
 from app.services.portfolio_service import PortfolioService
 from app.services.price_history_service import PriceHistoryService
+from app.services.screener_service import ScreenerService
+from app.services.search_history_service import SearchHistoryService
 from app.services.stock_service import StockService
 from app.services.watchlist_service import WatchlistService
 
@@ -60,12 +71,27 @@ from app.services.watchlist_service import WatchlistService
 # implementation directly - only these functions do.
 
 _bearer_scheme = HTTPBearer()
+_optional_bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def get_current_user_id(
     credentials: HTTPAuthorizationCredentials = Depends(_bearer_scheme),
     settings: Settings = Depends(get_settings),
 ) -> uuid.UUID:
+    return decode_access_token(credentials.credentials, settings)
+
+
+def get_optional_user_id(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_optional_bearer_scheme),
+    settings: Settings = Depends(get_settings),
+) -> uuid.UUID | None:
+    """For endpoints that work anonymously but behave differently when
+    authenticated (e.g. search history logging on `/stocks/search`). No
+    header at all -> None. A present-but-invalid/expired token still 401s -
+    silently swallowing a bad token would hide a real client bug.
+    """
+    if credentials is None:
+        return None
     return decode_access_token(credentials.credentials, settings)
 
 
@@ -244,3 +270,55 @@ def get_auth_service(
     settings: Settings = Depends(get_settings),
 ) -> AuthService:
     return AuthService(user_repository, refresh_token_repository, settings)
+
+
+def get_search_history_repository(db: AsyncSession = Depends(get_db_session)) -> SearchHistoryRepositoryPort:
+    return SqlAlchemySearchHistoryRepository(db)
+
+
+def get_search_history_service(
+    repository: SearchHistoryRepositoryPort = Depends(get_search_history_repository),
+) -> SearchHistoryService:
+    return SearchHistoryService(repository)
+
+
+def get_comparison_service(
+    stock_service: StockService = Depends(get_stock_service),
+    indicator_service: IndicatorService = Depends(get_indicator_service),
+    fundamentals_service: FundamentalsService = Depends(get_fundamentals_service),
+) -> ComparisonService:
+    return ComparisonService(stock_service, indicator_service, fundamentals_service)
+
+
+def get_screener_repository(db: AsyncSession = Depends(get_db_session)) -> ScreenerRepositoryPort:
+    return SqlAlchemyScreenerRepository(db)
+
+
+def get_screener_service(
+    repository: ScreenerRepositoryPort = Depends(get_screener_repository),
+) -> ScreenerService:
+    return ScreenerService(repository)
+
+
+def get_ipo_repository(db: AsyncSession = Depends(get_db_session)) -> IpoRepositoryPort:
+    return SqlAlchemyIpoRepository(db)
+
+
+def get_ipo_service(
+    provider: StockDataProviderPort = Depends(get_nse_provider),
+    repository: IpoRepositoryPort = Depends(get_ipo_repository),
+) -> IpoService:
+    return IpoService(provider, repository)
+
+
+def get_chat_service(
+    stock_repository: StockRepositoryPort = Depends(get_stock_repository),
+    stock_service: StockService = Depends(get_stock_service),
+    indicator_service: IndicatorService = Depends(get_indicator_service),
+    portfolio_service: PortfolioService = Depends(get_portfolio_service),
+    watchlist_service: WatchlistService = Depends(get_watchlist_service),
+    notification_service: NotificationService = Depends(get_notification_service),
+) -> ChatService:
+    return ChatService(
+        stock_repository, stock_service, indicator_service, portfolio_service, watchlist_service, notification_service
+    )

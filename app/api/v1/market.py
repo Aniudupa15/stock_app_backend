@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import get_market_mover_service
+from app.schemas.heatmap import HeatmapOut
 from app.schemas.market_mover import MarketMoverOut
 from app.services.market_mover_service import MarketMoverService
 
@@ -8,6 +9,7 @@ router = APIRouter(prefix="/market", tags=["market"])
 
 _period_query = Query("1D", description="1D, 1W, 1M, 3M, or 1Y")
 _limit_query = Query(20, ge=1, le=100)
+_heatmap_limit_query = Query(100, ge=1, le=500)
 
 
 @router.get("/gainers", response_model=list[MarketMoverOut])
@@ -50,3 +52,11 @@ async def get_52_week_low(
     service: MarketMoverService = Depends(get_market_mover_service),
 ) -> list[MarketMoverOut]:
     return await service.get_52_week_low(limit)
+
+
+@router.get("/heatmap", response_model=HeatmapOut)
+async def get_heatmap(
+    limit: int = _heatmap_limit_query,
+    service: MarketMoverService = Depends(get_market_mover_service),
+) -> HeatmapOut:
+    return await service.get_heatmap(limit)
