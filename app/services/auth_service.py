@@ -2,7 +2,12 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from app.core.config import Settings
-from app.core.exceptions import EmailAlreadyRegisteredError, InvalidCredentialsError, InvalidRefreshTokenError
+from app.core.exceptions import (
+    EmailAlreadyRegisteredError,
+    InvalidCredentialsError,
+    InvalidRefreshTokenError,
+    UserNotFoundError,
+)
 from app.core.security import (
     create_access_token,
     generate_refresh_token,
@@ -11,7 +16,7 @@ from app.core.security import (
     verify_password,
 )
 from app.domain.ports import RefreshTokenRepositoryPort, UserRepositoryPort
-from app.schemas.auth import TokenPairOut
+from app.schemas.auth import TokenPairOut, UserProfileOut
 
 
 class AuthService:
@@ -54,6 +59,24 @@ class AuthService:
         stored = await self._refresh_token_repository.get_by_hash(hash_refresh_token(raw_refresh_token))
         if stored is not None and stored.revoked_at is None:
             await self._refresh_token_repository.revoke(stored.id)
+
+    async def get_profile(self, user_id: uuid.UUID) -> UserProfileOut:
+        user = await self._user_repository.get_by_id(user_id)
+        if user is None:
+            raise UserNotFoundError(user_id)
+        return UserProfileOut(id=user.id, email=user.email, display_name=user.display_name, created_at=user.created_at)
+
+    async def update_profile(self, user_id: uuid.UUID, display_name: str | None, email: str | None) -> UserProfileOut:
+        if await self._user_repository.get_by_id(user_id) is None:
+            raise UserNotFoundError(user_id)
+
+        if email is not None:
+            existing = await self._user_repository.get_by_email(email)
+            if existing is not None and existing.id != user_id:
+                raise EmailAlreadyRegisteredError(email)
+
+        user = await self._user_repository.update(user_id, display_name, email)
+        return UserProfileOut(id=user.id, email=user.email, display_name=user.display_name, created_at=user.created_at)
 
     async def _issue_tokens(self, user_id: uuid.UUID) -> TokenPairOut:
         access_token = create_access_token(user_id, self._settings)

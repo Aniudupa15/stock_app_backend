@@ -1,7 +1,17 @@
+import uuid
+
 from fastapi import APIRouter, Depends, status
 
-from app.api.deps import get_auth_service
-from app.schemas.auth import LoginRequest, LogoutRequest, RefreshRequest, RegisterRequest, TokenPairOut
+from app.api.deps import get_auth_service, get_current_user_id
+from app.schemas.auth import (
+    LoginRequest,
+    LogoutRequest,
+    RefreshRequest,
+    RegisterRequest,
+    TokenPairOut,
+    UpdateProfileRequest,
+    UserProfileOut,
+)
 from app.services.auth_service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -37,3 +47,20 @@ async def logout(
     service: AuthService = Depends(get_auth_service),
 ) -> None:
     await service.logout(body.refresh_token)
+
+
+@router.get("/me", response_model=UserProfileOut)
+async def get_me(
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    service: AuthService = Depends(get_auth_service),
+) -> UserProfileOut:
+    return await service.get_profile(user_id)
+
+
+@router.patch("/me", response_model=UserProfileOut)
+async def update_me(
+    body: UpdateProfileRequest,
+    user_id: uuid.UUID = Depends(get_current_user_id),
+    service: AuthService = Depends(get_auth_service),
+) -> UserProfileOut:
+    return await service.update_profile(user_id, body.display_name, body.email)

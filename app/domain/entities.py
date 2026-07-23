@@ -277,3 +277,59 @@ class RefreshToken:
     expires_at: datetime
     revoked_at: datetime | None
     created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class SearchHistoryEntry:
+    query: str
+    searched_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class StockIndicatorSnapshot:
+    """One materialized row of a stock's key daily indicators, refreshed once
+    a day right after the price sync - the screener filters against this
+    table instead of recomputing indicators live over the whole universe on
+    every request.
+    """
+
+    symbol: str
+    name: str
+    as_of: date
+    close: Decimal
+    volume: int
+    rsi_14: Decimal | None
+    sma_50: Decimal | None
+    sma_200: Decimal | None
+
+
+@dataclass(frozen=True, slots=True)
+class ScreenerFilters:
+    rsi_below: Decimal | None = None
+    rsi_above: Decimal | None = None
+    price_min: Decimal | None = None
+    price_max: Decimal | None = None
+    above_sma_50: bool | None = None  # None = don't filter; True = close > sma_50; False = close < sma_50
+    min_volume: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class IpoFiling:
+    """Normalized from two different NSE endpoints with different field
+    names (`/api/all-upcoming-issues?category=ipo` for active/upcoming,
+    `/api/public-past-issues?index=equities` for already-listed) - `status`
+    is the source's own value for the first ("Active", etc.) or the literal
+    "LISTED" for the second. `price_range`/`issue_size` are kept as raw NSE
+    strings (e.g. "Rs.120 to Rs.127") rather than parsed into numbers - the
+    format isn't consistent enough across rows to parse safely.
+    """
+
+    symbol: str
+    company_name: str
+    status: str
+    price_range: str | None
+    issue_size: str | None
+    issue_start_date: date | None
+    issue_end_date: date | None
+    listing_date: date | None
+    series: str | None

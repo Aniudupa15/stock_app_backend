@@ -5,13 +5,13 @@ from app.services.market_mover_service import MarketMoverService
 from tests.conftest import FakeMarketMoverRepository
 
 
-def _mover(symbol: str) -> MarketMover:
+def _mover(symbol: str, change_percent: Decimal | None = Decimal("5.00")) -> MarketMover:
     return MarketMover(
         symbol=symbol,
         name=f"{symbol} Ltd",
         last_price=Decimal("100.00"),
         change=Decimal("5.00"),
-        change_percent=Decimal("5.00"),
+        change_percent=change_percent,
         volume=1_000,
     )
 
@@ -65,3 +65,40 @@ async def test_get_52_week_high_and_low_delegate_with_direction():
     assert high[0].symbol == "E"
     assert low[0].symbol == "F"
     assert repo.calls == [("get_52_week_extremes", "high", 10), ("get_52_week_extremes", "low", 10)]
+
+
+async def test_get_heatmap_buckets_by_change_percent():
+    movers = [
+        _mover("A", Decimal("5")),  # STRONG_GAIN
+        _mover("B", Decimal("1")),  # GAIN
+        _mover("C", Decimal("0")),  # FLAT
+        _mover("D", Decimal("-1")),  # LOSS
+        _mover("E", Decimal("-5")),  # STRONG_LOSS
+        _mover("F", None),  # UNKNOWN
+    ]
+    repo = FakeMarketMoverRepository(most_active=movers)
+    service = MarketMoverService(repo)
+
+    heatmap = await service.get_heatmap(100)
+
+    buckets = {tile.symbol: tile.bucket for tile in heatmap.tiles}
+    assert buckets == {
+        "A": "STRONG_GAIN",
+        "B": "GAIN",
+        "C": "FLAT",
+        "D": "LOSS",
+        "E": "STRONG_LOSS",
+        "F": "UNKNOWN",
+    }
+    assert len(heatmap.notes) == 1
+    assert repo.calls == [("get_most_active", 100)]
+
+
+async def test_get_heatmap_boundary_at_exactly_3_percent_is_strong():
+    repo = FakeMarketMoverRepository(most_active=[_mover("G", Decimal("3")), _mover("H", Decimal("-3"))])
+    service = MarketMoverService(repo)
+
+    heatmap = await service.get_heatmap(100)
+
+    buckets = {tile.symbol: tile.bucket for tile in heatmap.tiles}
+    assert buckets == {"G": "STRONG_GAIN", "H": "STRONG_LOSS"}

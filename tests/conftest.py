@@ -22,6 +22,7 @@ from app.domain.entities import (
     FinancialResultRecord,
     IndexQuote,
     InstrumentType,
+    IpoFiling,
     MarketMover,
     MarketStatus,
     NewsArticle,
@@ -32,7 +33,10 @@ from app.domain.entities import (
     PortfolioTransaction,
     Quote,
     RefreshToken,
+    ScreenerFilters,
+    SearchHistoryEntry,
     Stock,
+    StockIndicatorSnapshot,
     StockMasterRecord,
     User,
     Watchlist,
@@ -44,12 +48,15 @@ from app.domain.ports import (
     CorporateActionRepositoryPort,
     FinancialResultRepositoryPort,
     HistoricalPriceRepositoryPort,
+    IpoRepositoryPort,
     MarketMoverRepositoryPort,
     NewsProviderPort,
     NewsRepositoryPort,
     NotificationRepositoryPort,
     PortfolioRepositoryPort,
     RefreshTokenRepositoryPort,
+    ScreenerRepositoryPort,
+    SearchHistoryRepositoryPort,
     StockDataProviderPort,
     StockRepositoryPort,
     UserRepositoryPort,
@@ -128,6 +135,7 @@ class FakeStockDataProvider(StockDataProviderPort):
         financial_details: dict[str, FinancialResultRecord] | None = None,
         market_statuses: list[MarketStatus] | None = None,
         indices: list[IndexQuote] | None = None,
+        ipo_filings: list[IpoFiling] | None = None,
     ):
         self.quotes = quotes or {}
         self.universe = universe or []
@@ -137,6 +145,7 @@ class FakeStockDataProvider(StockDataProviderPort):
         self.financial_details = financial_details or {}  # keyed by xbrl_url
         self.market_statuses = market_statuses or []
         self.indices = indices or []
+        self.ipo_filings = ipo_filings or []
         self.fail_with: Exception | None = None
 
     async def get_quote(self, symbol: str) -> Quote:
@@ -182,6 +191,11 @@ class FakeStockDataProvider(StockDataProviderPort):
         if self.fail_with:
             raise self.fail_with
         return self.indices
+
+    async def fetch_ipo_filings(self) -> list[IpoFiling]:
+        if self.fail_with:
+            raise self.fail_with
+        return self.ipo_filings
 
 
 class FakeHistoricalPriceRepository(HistoricalPriceRepositoryPort):
@@ -474,6 +488,16 @@ class FakeUserRepository(UserRepositoryPort):
         self.users_by_id[user.id] = user
         return user
 
+    async def update(self, user_id: uuid.UUID, display_name: str | None, email: str | None) -> User:
+        user = self.users_by_id[user_id]
+        updated = replace(
+            user,
+            display_name=display_name if display_name is not None else user.display_name,
+            email=email.strip().lower() if email is not None else user.email,
+        )
+        self.users_by_id[user_id] = updated
+        return updated
+
 
 class FakeRefreshTokenRepository(RefreshTokenRepositoryPort):
     def __init__(self):
@@ -498,6 +522,71 @@ class FakeRefreshTokenRepository(RefreshTokenRepositoryPort):
         token = self.tokens_by_id.get(token_id)
         if token is not None:
             self.tokens_by_id[token_id] = replace(token, revoked_at=datetime.now(UTC))
+
+
+class FakeSearchHistoryRepository(SearchHistoryRepositoryPort):
+    def __init__(self):
+        self.entries_by_user: dict[uuid.UUID, list[SearchHistoryEntry]] = {}
+
+    async def log(self, user_id: uuid.UUID, query: str) -> None:
+        entry = SearchHistoryEntry(query=query.strip(), searched_at=datetime.now(UTC))
+        self.entries_by_user.setdefault(user_id, []).append(entry)
+
+    async def list_for_user(self, user_id: uuid.UUID, limit: int, offset: int) -> list[SearchHistoryEntry]:
+        entries = sorted(self.entries_by_user.get(user_id, []), key=lambda e: e.searched_at, reverse=True)
+        return entries[offset : offset + limit]
+
+    async def clear_for_user(self, user_id: uuid.UUID) -> int:
+        count = len(self.entries_by_user.get(user_id, []))
+        self.entries_by_user[user_id] = []
+        return count
+
+
+class FakeScreenerRepository(ScreenerRepositoryPort):
+    def __init__(self, snapshots: list[StockIndicatorSnapshot] | None = None):
+        self.snapshots_by_symbol: dict[str, StockIndicatorSnapshot] = {s.symbol: s for s in (snapshots or [])}
+
+    async def bulk_upsert(self, snapshots: list[StockIndicatorSnapshot]) -> int:
+        for s in snapshots:
+            self.snapshots_by_symbol[s.symbol] = s
+        return len(snapshots)
+
+    async def screen(self, filters: ScreenerFilters, limit: int) -> list[StockIndicatorSnapshot]:
+        results = []
+        for s in self.snapshots_by_symbol.values():
+            if filters.rsi_below is not None and not (s.rsi_14 is not None and s.rsi_14 < filters.rsi_below):
+                continue
+            if filters.rsi_above is not None and not (s.rsi_14 is not None and s.rsi_14 > filters.rsi_above):
+                continue
+            if filters.price_min is not None and s.close < filters.price_min:
+                continue
+            if filters.price_max is not None and s.close > filters.price_max:
+                continue
+            if filters.above_sma_50 is True and not (s.sma_50 is not None and s.close > s.sma_50):
+                continue
+            if filters.above_sma_50 is False and not (s.sma_50 is not None and s.close < s.sma_50):
+                continue
+            if filters.min_volume is not None and s.volume < filters.min_volume:
+                continue
+            results.append(s)
+        return sorted(results, key=lambda s: s.symbol)[:limit]
+
+
+class FakeIpoRepository(IpoRepositoryPort):
+    def __init__(self, filings: list[IpoFiling] | None = None):
+        self.filings_by_symbol: dict[str, IpoFiling] = {f.symbol: f for f in (filings or [])}
+
+    async def bulk_upsert(self, filings: list[IpoFiling]) -> int:
+        for f in filings:
+            self.filings_by_symbol[f.symbol] = f
+        return len(filings)
+
+    async def list_all(self, status: str | None, limit: int, offset: int) -> list[IpoFiling]:
+        filings = list(self.filings_by_symbol.values())
+        if status is not None:
+            filings = [f for f in filings if f.status == status.strip().upper()]
+        filings.sort(key=lambda f: f.symbol)
+        return filings[offset : offset + limit]
 
 
 @pytest.fixture
@@ -593,9 +682,9 @@ async def db_session(postgres_url) -> AsyncSession:
     async with session_factory() as session:
         await session.execute(
             text(
-                "TRUNCATE TABLE notifications, alerts, news_articles, portfolio_transactions, portfolios, "
-                "watchlist_items, watchlists, financial_results, corporate_actions, historical_prices, stocks "
-                "RESTART IDENTITY CASCADE"
+                "TRUNCATE TABLE search_history, notifications, alerts, news_articles, portfolio_transactions, "
+                "portfolios, watchlist_items, watchlists, financial_results, corporate_actions, historical_prices, "
+                "ipo_filings, stocks RESTART IDENTITY CASCADE"
             )
         )
         await session.commit()
