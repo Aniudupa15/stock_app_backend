@@ -25,7 +25,7 @@ from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_ex
 
 from app.core.config import Settings
 from app.providers.nse.circuit_breaker import AsyncCircuitBreaker, CircuitOpenError
-from app.providers.nse.endpoints import BHAVCOPY_ZIP_URL_TEMPLATE, EQUITY_LIST_CSV_URL
+from app.providers.nse.endpoints import BHAVCOPY_ZIP_URL_TEMPLATE, EQUITY_LIST_CSV_URL, IPO_WARMUP_URL
 from app.providers.nse.exceptions import (
     NseAuthExpiredError,
     NseNotFoundError,
@@ -158,6 +158,57 @@ class NseClient:
             # ProviderUnavailableError) catches this the same as any other
             # NSE failure, instead of it leaking as an unhandled 500.
             raise NseServerError(path, 0) from exc
+
+    async def _fetch_ipo_json_once(self, path: str, params: dict) -> dict | list:
+        # IPO endpoints need a session bootstrapped against the IPO page
+        # itself, not the homepage - confirmed live (2026-07-22): the shared
+        # homepage bootstrap was blocked at the time, but warming up against
+        # this specific page succeeded. Uses its own short-lived client
+        # rather than `self._http`'s shared session/cookie state, since this
+        # runs once a day (a sync job), not a hot request path.
+        async with httpx.AsyncClient(timeout=self._settings.NSE_REQUEST_TIMEOUT_SECONDS) as client:
+            headers = self._build_headers()
+            try:
+                warmup = await client.get(IPO_WARMUP_URL, headers=headers)
+            except httpx.TimeoutException as exc:
+                raise NseTimeoutError(f"{path} (ipo warmup)") from exc
+            except httpx.HTTPError as exc:
+                raise NseServerError(f"{path} (ipo warmup)", 0) from exc
+            if warmup.status_code >= 400:
+                raise NseServerError(f"{path} (ipo warmup)", warmup.status_code)
+
+            try:
+                resp = await client.get(self._settings.NSE_BASE_URL + path, params=params, headers=headers)
+            except httpx.TimeoutException as exc:
+                raise NseTimeoutError(path) from exc
+            except httpx.HTTPError as exc:
+                raise NseServerError(path, 0) from exc
+
+        if resp.status_code == 404:
+            raise NseNotFoundError(path)
+        if resp.status_code in (401, 403):
+            raise NseAuthExpiredError(path, resp.status_code)
+        if resp.status_code == 429:
+            retry_after = resp.headers.get("Retry-After")
+            raise NseRateLimitedError(path, float(retry_after) if retry_after else None)
+        if resp.status_code >= 500:
+            raise NseServerError(path, resp.status_code)
+
+        resp.raise_for_status()
+        return resp.json()
+
+    async def get_ipo_json(self, path: str, params: dict | None = None) -> dict | list:
+        """Fetch JSON from an IPO endpoint, with its own retry (no shared
+        circuit breaker - this is a rare, once-daily call, isolating it means
+        a run of IPO failures can't trip the breaker for every other NSE call).
+        """
+        retrying = retry(
+            retry=retry_if_exception_type((NseTimeoutError, NseServerError, NseAuthExpiredError, NseRateLimitedError)),
+            stop=stop_after_attempt(self._settings.NSE_MAX_RETRIES),
+            wait=_wait_for_retry_after,
+            reraise=True,
+        )(self._fetch_ipo_json_once)
+        return await retrying(path, params or {})
 
     async def _fetch_static_file_once(self, url: str, label: str) -> bytes:
         try:

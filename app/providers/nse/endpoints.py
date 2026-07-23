@@ -46,6 +46,18 @@ FINANCIAL_RESULTS_INDEX_PATH = "/api/corporates-financial-results"
 MARKET_STATUS_PATH = "/api/marketStatus"
 ALL_INDICES_PATH = "/api/allIndices"
 
+# Cookie-gated JSON API, confirmed LIVE and working this session (2026-07-22,
+# Phase 6) - the generic homepage bootstrap was blocked at the time, but
+# warming up the session against this specific page (instead of the
+# homepage) succeeded, and both endpoints returned real data. Confirmed
+# fields: upcoming/active issues -> companyName, symbol, series, status,
+# issuePrice, issueSize, issueStartDate, issueEndDate (DD-Mon-YYYY); past/
+# listed issues -> company, symbol, securityType, priceRange, issuePrice,
+# ipoStartDate, ipoEndDate, listingDate (DD-Mon-YYYY, or "-" if not yet listed).
+UPCOMING_IPO_PATH = "/api/all-upcoming-issues"  # ?category=ipo
+PAST_IPO_PATH = "/api/public-past-issues"  # ?index=equities
+IPO_WARMUP_URL = "https://www.nseindia.com/market-data/all-upcoming-issues-ipo"
+
 # Reserved for later phases - not called by any Phase 4 code path.
 HISTORICAL_EQUITY_PATH = "/api/historical/cm/equity"
 LIVE_ANALYSIS_GAINERS_PATH = "/api/live-analysis-variations"  # ?index=gainers

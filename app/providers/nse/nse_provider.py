@@ -9,6 +9,7 @@ from app.domain.entities import (
     FinancialResultFiling,
     FinancialResultRecord,
     IndexQuote,
+    IpoFiling,
     MarketStatus,
     Quote,
     StockMasterRecord,
@@ -20,7 +21,9 @@ from app.providers.nse.endpoints import (
     CORPORATE_ACTIONS_PATH,
     FINANCIAL_RESULTS_INDEX_PATH,
     MARKET_STATUS_PATH,
+    PAST_IPO_PATH,
     QUOTE_EQUITY_PATH,
+    UPCOMING_IPO_PATH,
 )
 from app.providers.nse.exceptions import NseError, NseNotFoundError
 from app.providers.nse.xbrl import select_quarterly_context
@@ -332,3 +335,59 @@ class NseStockDataProvider(StockDataProviderPort):
                 )
             )
         return indices
+
+    async def fetch_ipo_filings(self) -> list[IpoFiling]:
+        filings: list[IpoFiling] = []
+        failures = 0
+
+        try:
+            data = await self._client.get_ipo_json(UPCOMING_IPO_PATH, params={"category": "ipo"})
+            rows = data if isinstance(data, list) else []
+            for row in rows:
+                symbol = (row.get("symbol") or "").strip().upper()
+                if not symbol:
+                    continue
+                filings.append(
+                    IpoFiling(
+                        symbol=symbol,
+                        company_name=(row.get("companyName") or symbol).strip(),
+                        status=(row.get("status") or "ACTIVE").strip().upper(),
+                        price_range=(row.get("issuePrice") or "").strip() or None,
+                        issue_size=(row.get("issueSize") or "").strip() or None,
+                        issue_start_date=_to_date(row.get("issueStartDate")),
+                        issue_end_date=_to_date(row.get("issueEndDate")),
+                        listing_date=None,
+                        series=(row.get("series") or "").strip() or None,
+                    )
+                )
+        except NseError as exc:
+            failures += 1
+            logger.warning("upcoming IPO fetch failed: %s", exc)
+
+        try:
+            data = await self._client.get_ipo_json(PAST_IPO_PATH, params={"index": "equities"})
+            rows = data if isinstance(data, list) else []
+            for row in rows:
+                symbol = (row.get("symbol") or "").strip().upper()
+                if not symbol:
+                    continue
+                filings.append(
+                    IpoFiling(
+                        symbol=symbol,
+                        company_name=(row.get("company") or symbol).strip(),
+                        status="LISTED",
+                        price_range=(row.get("priceRange") or "").strip() or None,
+                        issue_size=None,
+                        issue_start_date=_to_date(row.get("ipoStartDate")),
+                        issue_end_date=_to_date(row.get("ipoEndDate")),
+                        listing_date=_to_date(row.get("listingDate")),
+                        series=(row.get("securityType") or "").strip() or None,
+                    )
+                )
+        except NseError as exc:
+            failures += 1
+            logger.warning("past IPO fetch failed: %s", exc)
+
+        if failures == 2:
+            raise ProviderUnavailableError("NSE", "both IPO endpoints unreachable")
+        return filings

@@ -135,3 +135,59 @@ async def test_register_rejects_invalid_email(auth_client):
     )
 
     assert resp.status_code == 422
+
+
+async def test_get_me_returns_profile(auth_client):
+    register_resp = await auth_client.post(
+        "/api/v1/auth/register",
+        json={"email": "profile-get@example.com", "password": "password123", "display_name": "Profile Getter"},
+    )
+    access_token = register_resp.json()["access_token"]
+
+    resp = await auth_client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {access_token}"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["email"] == "profile-get@example.com"
+    assert body["display_name"] == "Profile Getter"
+
+
+async def test_get_me_without_token_returns_403(auth_client):
+    resp = await auth_client.get("/api/v1/auth/me")
+    assert resp.status_code == 403
+
+
+async def test_update_me_changes_display_name(auth_client):
+    register_resp = await auth_client.post(
+        "/api/v1/auth/register",
+        json={"email": "profile-update@example.com", "password": "password123", "display_name": "Old Name"},
+    )
+    access_token = register_resp.json()["access_token"]
+
+    resp = await auth_client.patch(
+        "/api/v1/auth/me", json={"display_name": "New Name"}, headers={"Authorization": f"Bearer {access_token}"}
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["display_name"] == "New Name"
+    assert resp.json()["email"] == "profile-update@example.com"
+
+
+async def test_update_me_rejects_email_taken_by_another_user(auth_client):
+    await auth_client.post(
+        "/api/v1/auth/register",
+        json={"email": "taken-profile@example.com", "password": "password123", "display_name": "First"},
+    )
+    register_resp = await auth_client.post(
+        "/api/v1/auth/register",
+        json={"email": "second-profile@example.com", "password": "password123", "display_name": "Second"},
+    )
+    access_token = register_resp.json()["access_token"]
+
+    resp = await auth_client.patch(
+        "/api/v1/auth/me",
+        json={"email": "taken-profile@example.com"},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert resp.status_code == 409
