@@ -14,12 +14,16 @@ from app.repositories.alert_repository import SqlAlchemyAlertRepository
 from app.repositories.corporate_action_repository import SqlAlchemyCorporateActionRepository
 from app.repositories.financial_result_repository import SqlAlchemyFinancialResultRepository
 from app.repositories.historical_price_repository import SqlAlchemyHistoricalPriceRepository
+from app.repositories.ipo_repository import SqlAlchemyIpoRepository
 from app.repositories.news_repository import SqlAlchemyNewsRepository
 from app.repositories.notification_repository import SqlAlchemyNotificationRepository
+from app.repositories.screener_repository import SqlAlchemyScreenerRepository
 from app.repositories.stock_repository import SqlAlchemyStockRepository
 from app.services.alert_evaluation_service import AlertEvaluationService
 from app.services.corporate_action_service import CorporateActionService
 from app.services.financial_results_sync_service import FinancialResultsSyncService
+from app.services.indicator_snapshot_sync_service import IndicatorSnapshotSyncService
+from app.services.ipo_service import IpoService
 from app.services.news_service import NewsService
 from app.services.price_history_service import PriceHistoryService
 from app.services.universe_sync_service import UniverseSyncService
@@ -193,3 +197,45 @@ async def run_alert_evaluation(settings: Settings) -> None:
             logger.info("Scheduled alert evaluation succeeded: triggered=%d", triggered)
         except Exception:
             logger.exception("Scheduled alert evaluation failed")
+
+
+async def run_indicator_snapshot_sync(settings: Settings) -> None:
+    """Scheduled job body: refreshes the `stock_indicator_snapshots` table
+    the screener reads from, for every active stock. Scheduled to run after
+    `run_daily_price_sync` so it's working from that day's fresh bars.
+    """
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        stock_repository = SqlAlchemyStockRepository(session)
+        price_repository = SqlAlchemyHistoricalPriceRepository(session)
+        screener_repository = SqlAlchemyScreenerRepository(session)
+        service = IndicatorSnapshotSyncService(stock_repository, price_repository, screener_repository)
+        try:
+            upserted = await service.sync_all()
+            logger.info("Scheduled indicator snapshot sync succeeded: upserted=%d", upserted)
+        except Exception:
+            logger.exception("Scheduled indicator snapshot sync failed")
+
+
+async def run_ipo_sync(settings: Settings) -> None:
+    """Scheduled job body: refreshes upcoming/active/listed IPO filings.
+
+    Best-effort, same as corporate actions - bypasses the shared NseClient
+    circuit breaker (see NseClient.get_ipo_json), so failures here are logged
+    and skipped rather than raised, leaving the API serving the last
+    successful sync.
+    """
+    client = NseClient(settings)
+    try:
+        provider = NseStockDataProvider(client)
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            repository = SqlAlchemyIpoRepository(session)
+            service = IpoService(provider, repository)
+            try:
+                upserted = await service.sync()
+                logger.info("Scheduled IPO sync succeeded: upserted=%d", upserted)
+            except Exception:
+                logger.exception("Scheduled IPO sync failed")
+    finally:
+        await client.aclose()

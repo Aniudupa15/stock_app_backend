@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     FINANCIAL_RESULTS_SYNC_MINUTE_IST: int = 0
     NEWS_SYNC_INTERVAL_MINUTES: int = 30
     ALERT_EVALUATION_INTERVAL_MINUTES: int = 15
+    INDICATOR_SNAPSHOT_SYNC_HOUR_IST: int = 18
+    INDICATOR_SNAPSHOT_SYNC_MINUTE_IST: int = 30
+    IPO_SYNC_HOUR_IST: int = 7
+    IPO_SYNC_MINUTE_IST: int = 45
 
     @property
     def cors_origins_list(self) -> list[str]:

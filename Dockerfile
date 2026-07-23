@@ -16,11 +16,16 @@ COPY alembic.ini .
 COPY scripts ./scripts
 
 USER appuser
-EXPOSE 8000
+
+# Default for local/docker-compose use. Render (and Railway) inject their
+# own $PORT automatically at container start - both the healthcheck and the
+# CMD below read $PORT at runtime rather than baking a port in at build time.
+ENV PORT=8000
+EXPOSE $PORT
 
 # Uses Python's own stdlib rather than installing curl into the slim image
 # just for this one check.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/healthz')"]
+    CMD ["python", "-c", "import os, urllib.request; urllib.request.urlopen(f'http://localhost:{os.environ.get(\"PORT\", \"8000\")}/api/v1/healthz')"]
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

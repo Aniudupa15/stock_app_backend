@@ -75,3 +75,22 @@ async def test_52_week_high_and_low_endpoints(app_client, db_session):
     assert "NEWHIGH" in [m["symbol"] for m in high_resp.json()]
     assert low_resp.status_code == 200
     assert "NEWLOW" in [m["symbol"] for m in low_resp.json()]
+
+
+async def test_heatmap_endpoint_returns_bucketed_tiles(app_client, db_session):
+    client, _ = app_client
+    await _seed_bars(
+        db_session, "UP", {date(2026, 7, 20): (Decimal("100"), 500), date(2026, 7, 21): (Decimal("110"), 500)}
+    )
+    await _seed_bars(
+        db_session, "DOWN", {date(2026, 7, 20): (Decimal("100"), 500), date(2026, 7, 21): (Decimal("90"), 500)}
+    )
+
+    resp = await client.get("/api/v1/market/heatmap")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    tiles_by_symbol = {t["symbol"]: t for t in body["tiles"]}
+    assert tiles_by_symbol["UP"]["bucket"] == "STRONG_GAIN"
+    assert tiles_by_symbol["DOWN"]["bucket"] == "STRONG_LOSS"
+    assert len(body["notes"]) == 1

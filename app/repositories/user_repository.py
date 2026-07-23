@@ -40,3 +40,17 @@ class SqlAlchemyUserRepository(UserRepositoryPort):
         await self._session.commit()
         await self._session.refresh(model)
         return _to_entity(model)
+
+    async def update(self, user_id: uuid.UUID, display_name: str | None, email: str | None) -> User:
+        stmt = select(UserModel).where(UserModel.id == user_id)
+        result = await self._session.execute(stmt)
+        model = result.scalar_one()
+
+        if display_name is not None:
+            model.display_name = display_name
+        if email is not None:
+            model.email = email.strip().lower()
+
+        await self._session.commit()
+        await self._session.refresh(model)
+        return _to_entity(model)
