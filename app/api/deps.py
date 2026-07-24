@@ -12,7 +12,9 @@ from app.domain.ports import (
     CorporateActionRepositoryPort,
     FinancialResultRepositoryPort,
     HistoricalPriceRepositoryPort,
+    IntradaySignalSnapshotRepositoryPort,
     IpoRepositoryPort,
+    LongTermSignalSnapshotRepositoryPort,
     MarketMoverRepositoryPort,
     NewsProviderPort,
     NewsRepositoryPort,
@@ -34,7 +36,9 @@ from app.repositories.alert_repository import SqlAlchemyAlertRepository
 from app.repositories.corporate_action_repository import SqlAlchemyCorporateActionRepository
 from app.repositories.financial_result_repository import SqlAlchemyFinancialResultRepository
 from app.repositories.historical_price_repository import SqlAlchemyHistoricalPriceRepository
+from app.repositories.intraday_signal_snapshot_repository import SqlAlchemyIntradaySignalSnapshotRepository
 from app.repositories.ipo_repository import SqlAlchemyIpoRepository
+from app.repositories.long_term_signal_snapshot_repository import SqlAlchemyLongTermSignalSnapshotRepository
 from app.repositories.market_mover_repository import SqlAlchemyMarketMoverRepository
 from app.repositories.news_repository import SqlAlchemyNewsRepository
 from app.repositories.notification_repository import SqlAlchemyNotificationRepository
@@ -46,11 +50,13 @@ from app.repositories.stock_repository import SqlAlchemyStockRepository
 from app.repositories.user_repository import SqlAlchemyUserRepository
 from app.repositories.watchlist_repository import SqlAlchemyWatchlistRepository
 from app.services.alert_service import AlertService
+from app.services.analysis_service import AnalysisService
 from app.services.auth_service import AuthService
 from app.services.chat_service import ChatService
 from app.services.comparison_service import ComparisonService
 from app.services.corporate_action_service import CorporateActionService
 from app.services.dashboard_service import DashboardService
+from app.services.dividend_service import DividendService
 from app.services.fundamentals_service import FundamentalsService
 from app.services.indicator_service import IndicatorService
 from app.services.intraday_signal_service import IntradaySignalService
@@ -178,6 +184,37 @@ def get_long_term_signal_service(
     fundamentals_service: FundamentalsService = Depends(get_fundamentals_service),
 ) -> LongTermSignalService:
     return LongTermSignalService(stock_repository, fundamentals_service)
+
+
+def get_dividend_service(
+    corporate_action_repository: CorporateActionRepositoryPort = Depends(get_corporate_action_repository),
+    price_repository: HistoricalPriceRepositoryPort = Depends(get_historical_price_repository),
+    stock_repository: StockRepositoryPort = Depends(get_stock_repository),
+) -> DividendService:
+    return DividendService(corporate_action_repository, price_repository, stock_repository)
+
+
+def get_intraday_signal_snapshot_repository(
+    db: AsyncSession = Depends(get_db_session),
+) -> IntradaySignalSnapshotRepositoryPort:
+    return SqlAlchemyIntradaySignalSnapshotRepository(db)
+
+
+def get_long_term_signal_snapshot_repository(
+    db: AsyncSession = Depends(get_db_session),
+) -> LongTermSignalSnapshotRepositoryPort:
+    return SqlAlchemyLongTermSignalSnapshotRepository(db)
+
+
+def get_analysis_service(
+    intraday_snapshot_repository: IntradaySignalSnapshotRepositoryPort = Depends(
+        get_intraday_signal_snapshot_repository
+    ),
+    long_term_snapshot_repository: LongTermSignalSnapshotRepositoryPort = Depends(
+        get_long_term_signal_snapshot_repository
+    ),
+) -> AnalysisService:
+    return AnalysisService(intraday_snapshot_repository, long_term_snapshot_repository)
 
 
 def get_market_mover_repository(db: AsyncSession = Depends(get_db_session)) -> MarketMoverRepositoryPort:

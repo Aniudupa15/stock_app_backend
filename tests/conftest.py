@@ -22,7 +22,9 @@ from app.domain.entities import (
     FinancialResultRecord,
     IndexQuote,
     InstrumentType,
+    IntradaySignalSnapshot,
     IpoFiling,
+    LongTermSignalSnapshot,
     MarketMover,
     MarketStatus,
     NewsArticle,
@@ -48,7 +50,9 @@ from app.domain.ports import (
     CorporateActionRepositoryPort,
     FinancialResultRepositoryPort,
     HistoricalPriceRepositoryPort,
+    IntradaySignalSnapshotRepositoryPort,
     IpoRepositoryPort,
+    LongTermSignalSnapshotRepositoryPort,
     MarketMoverRepositoryPort,
     NewsProviderPort,
     NewsRepositoryPort,
@@ -226,6 +230,14 @@ class FakeCorporateActionRepository(CorporateActionRepositoryPort):
 
     async def get_for_symbol(self, symbol: str) -> list[CorporateAction]:
         return self.actions_by_symbol.get(symbol.strip().upper(), [])
+
+    async def list_dividend_actions(self, ex_date_from, ex_date_to) -> list[CorporateAction]:
+        return [
+            a
+            for actions in self.actions_by_symbol.values()
+            for a in actions
+            if "dividend" in a.purpose.lower() and a.ex_date is not None and ex_date_from <= a.ex_date <= ex_date_to
+        ]
 
 
 class FakeFinancialResultRepository(FinancialResultRepositoryPort):
@@ -570,6 +582,44 @@ class FakeScreenerRepository(ScreenerRepositoryPort):
                 continue
             results.append(s)
         return sorted(results, key=lambda s: s.symbol)[:limit]
+
+
+class FakeIntradaySignalSnapshotRepository(IntradaySignalSnapshotRepositoryPort):
+    def __init__(self, snapshots: list[IntradaySignalSnapshot] | None = None):
+        self.snapshots_by_symbol: dict[str, IntradaySignalSnapshot] = {s.symbol: s for s in (snapshots or [])}
+
+    async def bulk_upsert(self, snapshots: list[IntradaySignalSnapshot]) -> int:
+        for s in snapshots:
+            self.snapshots_by_symbol[s.symbol] = s
+        return len(snapshots)
+
+    async def list_top(self, min_confidence: Decimal, limit: int) -> list[IntradaySignalSnapshot]:
+        results = [
+            s
+            for s in self.snapshots_by_symbol.values()
+            if s.signal in ("BUY", "SELL") and s.confidence >= min_confidence
+        ]
+        return sorted(results, key=lambda s: s.confidence, reverse=True)[:limit]
+
+
+class FakeLongTermSignalSnapshotRepository(LongTermSignalSnapshotRepositoryPort):
+    def __init__(self, snapshots: list[LongTermSignalSnapshot] | None = None):
+        self.snapshots_by_symbol: dict[str, LongTermSignalSnapshot] = {s.symbol: s for s in (snapshots or [])}
+
+    async def bulk_upsert(self, snapshots: list[LongTermSignalSnapshot]) -> int:
+        for s in snapshots:
+            self.snapshots_by_symbol[s.symbol] = s
+        return len(snapshots)
+
+    async def list_top(self, min_confidence: int, tenure: str | None, limit: int) -> list[LongTermSignalSnapshot]:
+        results = [
+            s
+            for s in self.snapshots_by_symbol.values()
+            if s.signal == "BUY"
+            and s.confidence >= min_confidence
+            and (tenure is None or s.investment_tenure == tenure)
+        ]
+        return sorted(results, key=lambda s: s.confidence, reverse=True)[:limit]
 
 
 class FakeIpoRepository(IpoRepositoryPort):
