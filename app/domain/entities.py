@@ -304,6 +304,47 @@ class StockIndicatorSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class IntradaySignalSnapshot:
+    """One materialized row of a stock's intraday BUY/SELL/HOLD call, refreshed
+    once a day right after the indicator snapshot sync - powers the Analysis
+    screen's "top intraday picks" list without recomputing 2,000+ stocks'
+    signals live on every request. Computed by the exact same
+    `IntradaySignalService.get_signal()` the per-symbol endpoint uses - not a
+    separate/duplicated scoring path.
+    """
+
+    symbol: str
+    name: str
+    as_of: date
+    signal: str
+    confidence: Decimal
+    entry_price: Decimal | None
+    target_price: Decimal | None
+    stop_loss: Decimal | None
+    reasoning: list[str]
+
+
+@dataclass(frozen=True, slots=True)
+class LongTermSignalSnapshot:
+    """One materialized row of a stock's long-term BUY/HOLD/AVOID call, same
+    batch-refresh rationale as `IntradaySignalSnapshot`. `investment_tenure`
+    is new: a deterministic bucket ("6 Months"/"1 Year"/"3 Years"/"5 Years")
+    derived from `risk_level`/`growth_potential` - the underlying signal
+    services have no tenure concept, so this is computed once here.
+    """
+
+    symbol: str
+    name: str
+    as_of: date
+    signal: str
+    confidence: int
+    risk_level: str
+    growth_potential: str
+    investment_tenure: str
+    reasoning: list[str]
+
+
+@dataclass(frozen=True, slots=True)
 class ScreenerFilters:
     rsi_below: Decimal | None = None
     rsi_above: Decimal | None = None
