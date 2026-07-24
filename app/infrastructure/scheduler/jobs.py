@@ -14,7 +14,9 @@ from app.repositories.alert_repository import SqlAlchemyAlertRepository
 from app.repositories.corporate_action_repository import SqlAlchemyCorporateActionRepository
 from app.repositories.financial_result_repository import SqlAlchemyFinancialResultRepository
 from app.repositories.historical_price_repository import SqlAlchemyHistoricalPriceRepository
+from app.repositories.intraday_signal_snapshot_repository import SqlAlchemyIntradaySignalSnapshotRepository
 from app.repositories.ipo_repository import SqlAlchemyIpoRepository
+from app.repositories.long_term_signal_snapshot_repository import SqlAlchemyLongTermSignalSnapshotRepository
 from app.repositories.news_repository import SqlAlchemyNewsRepository
 from app.repositories.notification_repository import SqlAlchemyNotificationRepository
 from app.repositories.screener_repository import SqlAlchemyScreenerRepository
@@ -22,10 +24,14 @@ from app.repositories.stock_repository import SqlAlchemyStockRepository
 from app.services.alert_evaluation_service import AlertEvaluationService
 from app.services.corporate_action_service import CorporateActionService
 from app.services.financial_results_sync_service import FinancialResultsSyncService
+from app.services.fundamentals_service import FundamentalsService
 from app.services.indicator_snapshot_sync_service import IndicatorSnapshotSyncService
+from app.services.intraday_signal_service import IntradaySignalService
 from app.services.ipo_service import IpoService
+from app.services.long_term_signal_service import LongTermSignalService
 from app.services.news_service import NewsService
 from app.services.price_history_service import PriceHistoryService
+from app.services.signal_snapshot_sync_service import SignalSnapshotSyncService
 from app.services.universe_sync_service import UniverseSyncService
 
 logger = logging.getLogger(__name__)
@@ -215,6 +221,44 @@ async def run_indicator_snapshot_sync(settings: Settings) -> None:
             logger.info("Scheduled indicator snapshot sync succeeded: upserted=%d", upserted)
         except Exception:
             logger.exception("Scheduled indicator snapshot sync failed")
+
+
+async def run_signal_snapshot_sync(settings: Settings) -> None:
+    """Scheduled job body: refreshes the `intraday_signal_snapshots`/
+    `long_term_signal_snapshots` tables the Analysis screen reads from, for
+    every active stock. Scheduled to run after `run_indicator_snapshot_sync`
+    so both signal services are working from that day's fresh indicators.
+    """
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        stock_repository = SqlAlchemyStockRepository(session)
+        price_repository = SqlAlchemyHistoricalPriceRepository(session)
+        financial_repository = SqlAlchemyFinancialResultRepository(session)
+        corporate_action_repository = SqlAlchemyCorporateActionRepository(session)
+        intraday_signal_service = IntradaySignalService(stock_repository, price_repository)
+        fundamentals_service = FundamentalsService(
+            stock_repository, financial_repository, price_repository, corporate_action_repository
+        )
+        long_term_signal_service = LongTermSignalService(stock_repository, fundamentals_service)
+        intraday_snapshot_repository = SqlAlchemyIntradaySignalSnapshotRepository(session)
+        long_term_snapshot_repository = SqlAlchemyLongTermSignalSnapshotRepository(session)
+        service = SignalSnapshotSyncService(
+            stock_repository,
+            intraday_signal_service,
+            long_term_signal_service,
+            intraday_snapshot_repository,
+            long_term_snapshot_repository,
+        )
+        try:
+            intraday_upserted = await service.sync_intraday()
+            long_term_upserted = await service.sync_long_term()
+            logger.info(
+                "Scheduled signal snapshot sync succeeded: intraday=%d long_term=%d",
+                intraday_upserted,
+                long_term_upserted,
+            )
+        except Exception:
+            logger.exception("Scheduled signal snapshot sync failed")
 
 
 async def run_ipo_sync(settings: Settings) -> None:

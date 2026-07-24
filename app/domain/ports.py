@@ -9,6 +9,7 @@ provider and cache swappable without touching business logic.
 import uuid
 from abc import ABC, abstractmethod
 from datetime import date, datetime
+from decimal import Decimal
 
 from app.domain.entities import (
     Alert,
@@ -19,7 +20,9 @@ from app.domain.entities import (
     FinancialResultFiling,
     FinancialResultRecord,
     IndexQuote,
+    IntradaySignalSnapshot,
     IpoFiling,
+    LongTermSignalSnapshot,
     MarketMover,
     MarketStatus,
     NewsArticle,
@@ -156,6 +159,14 @@ class CorporateActionRepositoryPort(ABC):
 
     @abstractmethod
     async def get_for_symbol(self, symbol: str) -> list[CorporateAction]: ...
+
+    @abstractmethod
+    async def list_dividend_actions(self, ex_date_from: date, ex_date_to: date) -> list[CorporateAction]:
+        """Every corporate action across all active stocks whose `purpose`
+        mentions "dividend" and whose `ex_date` falls in
+        [ex_date_from, ex_date_to] - powers the cross-stock dividend list
+        without a per-symbol loop over the whole universe.
+        """
 
 
 class FinancialResultRepositoryPort(ABC):
@@ -422,6 +433,42 @@ class ScreenerRepositoryPort(ABC):
 
     @abstractmethod
     async def screen(self, filters: ScreenerFilters, limit: int) -> list[StockIndicatorSnapshot]: ...
+
+
+class IntradaySignalSnapshotRepositoryPort(ABC):
+    """Persistence for `intraday_signal_snapshots` - written by the daily
+    signal snapshot sync job (which reuses `IntradaySignalService.get_signal()`
+    across every active stock, not a separate scoring path), read by the
+    Analysis screen's intraday tab. Same materialized-snapshot rationale as
+    `ScreenerRepositoryPort`.
+    """
+
+    @abstractmethod
+    async def bulk_upsert(self, snapshots: list[IntradaySignalSnapshot]) -> int:
+        """One row per stock (unique on stock_id) - each sync run overwrites
+        the previous day's values rather than accumulating history.
+        """
+
+    @abstractmethod
+    async def list_top(self, min_confidence: Decimal, limit: int) -> list[IntradaySignalSnapshot]:
+        """BUY/SELL signals only (HOLD is excluded - "top picks" isn't
+        meaningful for a fence-sitting call), ordered by confidence descending.
+        """
+
+
+class LongTermSignalSnapshotRepositoryPort(ABC):
+    """Persistence for `long_term_signal_snapshots` - same rationale as
+    `IntradaySignalSnapshotRepositoryPort`.
+    """
+
+    @abstractmethod
+    async def bulk_upsert(self, snapshots: list[LongTermSignalSnapshot]) -> int: ...
+
+    @abstractmethod
+    async def list_top(self, min_confidence: int, tenure: str | None, limit: int) -> list[LongTermSignalSnapshot]:
+        """BUY signals only, optionally filtered to one `investment_tenure`
+        bucket, ordered by confidence descending.
+        """
 
 
 class IpoRepositoryPort(ABC):

@@ -1,5 +1,4 @@
 import logging
-import re
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -12,6 +11,7 @@ from app.domain.ports import (
     StockRepositoryPort,
 )
 from app.schemas.fundamentals import FundamentalsOut
+from app.services.dividend_parsing import sum_dividend_amount
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +21,6 @@ _YOY_TARGET_DAYS = 365
 _MATCH_TOLERANCE_DAYS = 20
 _PRICE_LOOKBACK_DAYS = 14
 _DIVIDEND_LOOKBACK_DAYS = 365
-
-_DIVIDEND_AMOUNT_PATTERN = re.compile(r"R[se]\.?\s*([\d,]+(?:\.\d+)?)\s*Per Share", re.IGNORECASE)
 
 
 def _growth_percent(current: Decimal | None, prior: Decimal | None) -> Decimal | None:
@@ -41,20 +39,6 @@ def _find_comparable_quarter(
     candidates.sort(key=lambda c: c[0])
     best_diff, best_quarter = candidates[0]
     return best_quarter if best_diff <= _MATCH_TOLERANCE_DAYS else None
-
-
-def _sum_dividend_amount(purpose: str) -> Decimal:
-    """Corporate-action `purpose` is free text (e.g. "Dividend - Rs 10 Per
-    Share/Special Dividend - Rs 30 Per Share") - sums every "Rs/Re X Per
-    Share" amount found, since one action can bundle multiple payouts.
-    """
-    total = Decimal("0")
-    for match in _DIVIDEND_AMOUNT_PATTERN.finditer(purpose):
-        try:
-            total += Decimal(match.group(1).replace(",", ""))
-        except Exception:
-            continue
-    return total
 
 
 class FundamentalsService:
@@ -123,7 +107,7 @@ class FundamentalsService:
             cutoff = to_date - timedelta(days=_DIVIDEND_LOOKBACK_DAYS)
             trailing_dividends = sum(
                 (
-                    _sum_dividend_amount(a.purpose)
+                    sum_dividend_amount(a.purpose)
                     for a in actions
                     if "dividend" in a.purpose.lower() and a.ex_date and a.ex_date >= cutoff
                 ),

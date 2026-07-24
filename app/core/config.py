@@ -54,6 +54,14 @@ class Settings(BaseSettings):
     INDICATOR_SNAPSHOT_SYNC_MINUTE_IST: int = 30
     IPO_SYNC_HOUR_IST: int = 7
     IPO_SYNC_MINUTE_IST: int = 45
+    SIGNAL_SNAPSHOT_SYNC_HOUR_IST: int = 18
+    SIGNAL_SNAPSHOT_SYNC_MINUTE_IST: int = 45
+
+    # Live WebSocket push (app/api/v1/live.py) - quote interval matches
+    # CACHE_QUOTE_TTL_SECONDS above so a broadcast tick never re-fetches a
+    # symbol NSE was already asked about within the last cache window.
+    LIVE_QUOTE_INTERVAL_SECONDS: int = 15
+    LIVE_MARKET_INTERVAL_SECONDS: int = 60
 
     @property
     def cors_origins_list(self) -> list[str]:
