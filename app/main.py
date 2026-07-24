@@ -24,6 +24,8 @@ from app.core.exceptions import (
 )
 from app.core.logging import configure_logging
 from app.infrastructure.db.session import dispose_engine
+from app.infrastructure.live.broadcaster import Broadcaster
+from app.infrastructure.live.connection_manager import ConnectionManager
 from app.infrastructure.scheduler.bootstrap import start_scheduler, stop_scheduler
 from app.providers.nse.client import NseClient
 
@@ -38,8 +40,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.nse_client = NseClient(settings)
     app.state.scheduler = start_scheduler(settings) if settings.SCHEDULER_ENABLED else None
 
+    app.state.live_connection_manager = ConnectionManager()
+    app.state.live_broadcaster = Broadcaster(
+        settings, app.state.cache, app.state.nse_client, app.state.live_connection_manager
+    )
+    app.state.live_broadcaster.start()
+
     yield
 
+    await app.state.live_broadcaster.stop()
     if app.state.scheduler is not None:
         stop_scheduler(app.state.scheduler)
     if isinstance(app.state.cache, RedisCache):

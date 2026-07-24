@@ -1,3 +1,5 @@
+from datetime import date
+
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -75,4 +77,31 @@ class SqlAlchemyCorporateActionRepository(CorporateActionRepositoryPort):
                 book_closure_end=row.book_closure_end,
             )
             for row in result.scalars().all()
+        ]
+
+    async def list_dividend_actions(self, ex_date_from: date, ex_date_to: date) -> list[CorporateAction]:
+        stmt = (
+            select(CorporateActionModel, StockModel.symbol)
+            .join(StockModel, StockModel.id == CorporateActionModel.stock_id)
+            .where(
+                CorporateActionModel.purpose.ilike("%dividend%"),
+                CorporateActionModel.ex_date.is_not(None),
+                CorporateActionModel.ex_date >= ex_date_from,
+                CorporateActionModel.ex_date <= ex_date_to,
+                StockModel.is_active.is_(True),
+            )
+            .order_by(CorporateActionModel.ex_date.asc())
+        )
+        result = await self._session.execute(stmt)
+        return [
+            CorporateAction(
+                symbol=symbol,
+                purpose=action.purpose,
+                face_value=action.face_value,
+                ex_date=action.ex_date,
+                record_date=action.record_date,
+                book_closure_start=action.book_closure_start,
+                book_closure_end=action.book_closure_end,
+            )
+            for action, symbol in result.all()
         ]

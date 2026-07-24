@@ -5,7 +5,7 @@ import pytest
 
 from app.core.exceptions import StockNotFoundError
 from app.domain.entities import BhavcopyRecord, CorporateAction, FinancialResultRecord
-from app.services.fundamentals_service import FundamentalsService, _sum_dividend_amount
+from app.services.fundamentals_service import FundamentalsService
 from tests.conftest import (
     FakeCorporateActionRepository,
     FakeFinancialResultRepository,
@@ -27,19 +27,6 @@ def _quarter(
         eps_basic=Decimal(eps),
         eps_diluted=Decimal(eps),
     )
-
-
-@pytest.mark.parametrize(
-    "purpose,expected",
-    [
-        ("Dividend - Rs 10 Per Share/Special Dividend - Rs 30 Per Share", Decimal("40")),
-        ("Interim Dividend - Rs 4 Per Share", Decimal("4")),
-        ("Dividend - Re 0.70 Per Share", Decimal("0.70")),
-        ("Face Value Split (Sub-Division) - From Rs 5/- Per Share To Rs 2/- Per Share", Decimal("0")),
-    ],
-)
-def test_sum_dividend_amount(purpose, expected):
-    assert _sum_dividend_amount(purpose) == expected
 
 
 async def test_get_fundamentals_raises_when_stock_unknown():

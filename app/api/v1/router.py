@@ -2,11 +2,14 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     alerts,
+    analysis,
     auth,
     chat,
     dashboard,
+    dividends,
     health,
     ipo,
+    live,
     market,
     news,
     notifications,
@@ -32,3 +35,6 @@ router.include_router(search_history.router)
 router.include_router(screener.router)
 router.include_router(ipo.router)
 router.include_router(chat.router)
+router.include_router(dividends.router)
+router.include_router(analysis.router)
+router.include_router(live.router)

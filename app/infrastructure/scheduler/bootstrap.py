@@ -13,6 +13,7 @@ from app.infrastructure.scheduler.jobs import (
     run_indicator_snapshot_sync,
     run_ipo_sync,
     run_news_sync,
+    run_signal_snapshot_sync,
     run_universe_sync,
 )
 
@@ -85,12 +86,21 @@ def start_scheduler(settings: Settings) -> AsyncIOScheduler:
         id="ipo_sync",
         replace_existing=True,
     )
+    scheduler.add_job(
+        run_signal_snapshot_sync,
+        trigger=CronTrigger(
+            hour=settings.SIGNAL_SNAPSHOT_SYNC_HOUR_IST, minute=settings.SIGNAL_SNAPSHOT_SYNC_MINUTE_IST
+        ),
+        args=[settings],
+        id="signal_snapshot_sync",
+        replace_existing=True,
+    )
     scheduler.start()
     logger.info(
         "Scheduler started: universe_sync %02d:%02d IST, daily_price_sync %02d:%02d IST, "
         "corporate_actions_sync %02d:%02d IST, financial_results_sync %02d:%02d IST, "
         "news_sync every %d min, alert_evaluation every %d min, indicator_snapshot_sync %02d:%02d IST, "
-        "ipo_sync %02d:%02d IST",
+        "ipo_sync %02d:%02d IST, signal_snapshot_sync %02d:%02d IST",
         settings.UNIVERSE_SYNC_HOUR_IST,
         settings.UNIVERSE_SYNC_MINUTE_IST,
         settings.PRICE_SYNC_HOUR_IST,
@@ -105,6 +115,8 @@ def start_scheduler(settings: Settings) -> AsyncIOScheduler:
         settings.INDICATOR_SNAPSHOT_SYNC_MINUTE_IST,
         settings.IPO_SYNC_HOUR_IST,
         settings.IPO_SYNC_MINUTE_IST,
+        settings.SIGNAL_SNAPSHOT_SYNC_HOUR_IST,
+        settings.SIGNAL_SNAPSHOT_SYNC_MINUTE_IST,
     )
     return scheduler
 
