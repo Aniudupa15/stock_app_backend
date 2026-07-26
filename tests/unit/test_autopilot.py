@@ -12,7 +12,7 @@ from libs.risk.gate import RiskGate, RiskProfile
 from libs.trading_calendar.calendar import TradingCalendar
 from libs.trading_domain.entities import MarketQuote
 from services.trading_service.autopilot.engine import AutoPilot
-from services.trading_service.autopilot.eod_report import build_eod_report
+from services.trading_service.autopilot.eod_report import build_eod_report, portfolio_summary
 from services.trading_service.autopilot.strategies import default_momentum_strategy
 
 MON = datetime(2026, 1, 5, 10, 0)
@@ -101,6 +101,31 @@ def test_eod_report_empty_day_is_safe():
     assert report.win_rate == 0.0
     assert report.net_pnl == Decimal("0")
     assert report.best_symbol is None
+
+
+def test_portfolio_summary_aggregates_all_trades():
+    from libs.trading_domain.entities import Trade
+
+    def trade(sym, pnl):
+        p = Decimal(str(pnl))
+        return Trade(
+            account_id=ACCOUNT,
+            symbol=sym,
+            qty=10,
+            entry_price=Decimal("100"),
+            exit_price=Decimal("100") + p / 10,
+            pnl_gross=p,
+            charges_total=Decimal("0"),
+            pnl_net=p,
+        )
+
+    summary = portfolio_summary([trade("AAA", 100), trade("BBB", -40), trade("CCC", 60)])
+    assert summary["total_trades"] == 3
+    assert summary["wins"] == 2
+    assert summary["losses"] == 1
+    assert summary["net_pnl"] == "120"
+    assert summary["best"]["symbol"] == "AAA"
+    assert summary["worst"]["symbol"] == "BBB"
 
 
 def test_default_strategy_is_white_box_and_inspectable():

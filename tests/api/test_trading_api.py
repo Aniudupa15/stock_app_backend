@@ -11,9 +11,10 @@ from httpx import ASGITransport, AsyncClient
 from app.core.auth import DEFAULT_USER_ID
 from app.core.config import get_settings
 from app.core.security import create_access_token
-from app.domain.entities import BhavcopyRecord, StockMasterRecord
+from app.domain.entities import BhavcopyRecord, IntradaySignalSnapshot, StockMasterRecord
 from app.infrastructure.db.session import get_db_session
 from app.repositories.historical_price_repository import SqlAlchemyHistoricalPriceRepository
+from app.repositories.intraday_signal_snapshot_repository import SqlAlchemyIntradaySignalSnapshotRepository
 from app.repositories.stock_repository import SqlAlchemyStockRepository
 from services.trading_service.api.app import create_trading_app
 
@@ -252,3 +253,48 @@ async def test_broker_complete_without_kiteconnect_returns_502(trading_client):
     # kiteconnect isn't installed in the test env -> adapter raises BrokerError -> 502
     assert resp.status_code == 502
     assert "kiteconnect" in resp.json()["detail"].lower()
+
+
+async def _seed_signal(db_session, symbol, confidence=75, signal="BUY"):
+    await SqlAlchemyIntradaySignalSnapshotRepository(db_session).bulk_upsert(
+        [
+            IntradaySignalSnapshot(
+                symbol=symbol,
+                name=f"{symbol} Ltd",
+                as_of=date(2026, 7, 24),
+                signal=signal,
+                confidence=Decimal(str(confidence)),
+                entry_price=Decimal("100"),
+                target_price=Decimal("103"),
+                stop_loss=Decimal("98"),
+                reasoning=["momentum: close above EMA20"],
+            )
+        ]
+    )
+    await db_session.commit()
+
+
+async def test_scanner_returns_buy_candidates(trading_client, db_session):
+    await _seed_history(db_session, "SCANCO", n=40)  # creates the stock
+    await _seed_signal(db_session, "SCANCO")
+    resp = await trading_client.get("/trading/scanner?limit=10&min_confidence=60")
+    assert resp.status_code == 200, resp.text
+    symbols = [c["symbol"] for c in resp.json()["candidates"]]
+    assert "SCANCO" in symbols
+
+
+async def test_autopilot_run_and_report(trading_client, db_session):
+    await _seed_history(db_session, "SCANCO", n=60)
+    await _seed_signal(db_session, "SCANCO")
+    account_id = (await trading_client.post("/trading/accounts", json={"starting_balance": "1000000"})).json()["id"]
+
+    run = await trading_client.post(f"/trading/accounts/{account_id}/autopilot/run?top_k=5&lookback_days=1000")
+    assert run.status_code == 200, run.text
+    body = run.json()
+    assert "summary" in body
+    assert any(c["symbol"] == "SCANCO" for c in body["candidates"])
+
+    report = await trading_client.get(f"/trading/accounts/{account_id}/report")
+    assert report.status_code == 200
+    assert "summary" in report.json()
+    assert "total_trades" in report.json()["summary"]
