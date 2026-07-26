@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
+    # Trading: Fernet key for encrypting broker API credentials at rest.
+    # Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
+    # If left blank, a key is derived from JWT_SECRET_KEY (fine for dev/tests,
+    # NOT for production - set a dedicated key so rotating one doesn't break the other).
+    TRADING_ENCRYPTION_KEY: str = ""
+
     # Scheduler
     SCHEDULER_ENABLED: bool = True
     UNIVERSE_SYNC_HOUR_IST: int = 8
