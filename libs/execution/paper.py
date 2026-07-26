@@ -108,7 +108,9 @@ class PaperExecutionVenue(ExecutionVenuePort):
             return self._reject(intent, "circuit locked", order_id=order_id)
 
         if intent.order_type is OrderType.MARKET:
-            price = self._slippage.adjust(intent.side, self._reference(intent.side, quote), intent.quantity, quote.day_volume)
+            price = self._slippage.adjust(
+                intent.side, self._reference(intent.side, quote), intent.quantity, quote.day_volume
+            )
             self._execute(order_id, intent, intent.quantity, price, now)
             return OrderAck(intent.intent_id, order_id, OrderState.COMPLETE)
 
@@ -127,10 +129,14 @@ class PaperExecutionVenue(ExecutionVenuePort):
             if r.order_id == venue_order_id:
                 self._resting.remove(r)
                 self._emit(
-                    OrderEvent(venue_order_id, r.intent.intent_id, OrderState.CANCELLED, 0, 0, Decimal("0"), self._clock())
+                    OrderEvent(
+                        venue_order_id, r.intent.intent_id, OrderState.CANCELLED, 0, 0, Decimal("0"), self._clock()
+                    )
                 )
                 return OrderAck(r.intent.intent_id, venue_order_id, OrderState.CANCELLED)
-        return OrderAck(intent_id=None, venue_order_id=venue_order_id, state=OrderState.REJECTED, reason="unknown order")
+        return OrderAck(
+            intent_id=None, venue_order_id=venue_order_id, state=OrderState.REJECTED, reason="unknown order"
+        )
 
     async def positions(self) -> list[Position]:
         out: list[Position] = []
@@ -200,7 +206,11 @@ class PaperExecutionVenue(ExecutionVenuePort):
 
     def _reject(self, intent: OrderIntent, reason: str, *, order_id: str | None = None) -> OrderAck:
         oid = order_id or self._next_id()
-        self._emit(OrderEvent(oid, intent.intent_id, OrderState.REJECTED, 0, intent.quantity, Decimal("0"), self._clock(), reason))
+        self._emit(
+            OrderEvent(
+                oid, intent.intent_id, OrderState.REJECTED, 0, intent.quantity, Decimal("0"), self._clock(), reason
+            )
+        )
         return OrderAck(intent.intent_id, None, OrderState.REJECTED, reason)
 
     @staticmethod
@@ -243,7 +253,9 @@ class PaperExecutionVenue(ExecutionVenuePort):
         if intent.order_type in (OrderType.LIMIT, OrderType.SL) and intent.price is not None:
             return intent.price  # limit fill, at the specified price
         # SL_M -> market with slippage from the reference.
-        return self._slippage.adjust(intent.side, self._reference(intent.side, quote), intent.quantity, quote.day_volume)
+        return self._slippage.adjust(
+            intent.side, self._reference(intent.side, quote), intent.quantity, quote.day_volume
+        )
 
     def _execute(self, order_id: str, intent: OrderIntent, qty: int, price: Decimal, now: datetime) -> None:
         charges = compute(intent.side, intent.product, qty, price, schedule=self._schedule)

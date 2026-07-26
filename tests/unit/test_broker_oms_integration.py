@@ -84,14 +84,30 @@ async def test_same_oms_drives_broker_venue_full_bracket_lifecycle():
     entry_oid = result.ack.venue_order_id
 
     # 2. Broker confirms the entry fill @ 1000 -> OMS places SL + target children.
-    venue.handle_order_update({"order_id": entry_oid, "status": "COMPLETE", "filled_quantity": 10, "pending_quantity": 0, "average_price": 1000})
+    venue.handle_order_update(
+        {
+            "order_id": entry_oid,
+            "status": "COMPLETE",
+            "filled_quantity": 10,
+            "pending_quantity": 0,
+            "average_price": 1000,
+        }
+    )
     await oms.process()
     assert oms.bracket_state(result.bracket_id) == "ACTIVE"
     assert len(adapter.orders) == 3  # entry + SL + target placed at the broker
 
     # 3. Broker confirms the target fill @ 1020 -> OCO cancels the SL, trade recorded.
     target_oid = [oid for oid, i in adapter.orders.items() if i.order_type is OrderType.LIMIT][0]
-    venue.handle_order_update({"order_id": target_oid, "status": "COMPLETE", "filled_quantity": 10, "pending_quantity": 0, "average_price": 1020})
+    venue.handle_order_update(
+        {
+            "order_id": target_oid,
+            "status": "COMPLETE",
+            "filled_quantity": 10,
+            "pending_quantity": 0,
+            "average_price": 1020,
+        }
+    )
     await oms.process()
 
     assert oms.bracket_state(result.bracket_id) == "CLOSED"
@@ -102,6 +118,9 @@ async def test_same_oms_drives_broker_venue_full_bracket_lifecycle():
     assert trade.exit_reason is ExitReason.TARGET
     assert trade.pnl_gross == Decimal("200")  # (1020-1000)*10
     # charges computed via libs/charges fallback (no paper fills on broker path)
-    expected_charges = compute(Side.BUY, Product.MIS, 10, Decimal("1000")).total + compute(Side.SELL, Product.MIS, 10, Decimal("1020")).total
+    expected_charges = (
+        compute(Side.BUY, Product.MIS, 10, Decimal("1000")).total
+        + compute(Side.SELL, Product.MIS, 10, Decimal("1020")).total
+    )
     assert trade.charges_total == expected_charges
     assert trade.pnl_net == Decimal("200") - expected_charges

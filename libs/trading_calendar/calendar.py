@@ -122,9 +122,7 @@ class TradingCalendar:
         """True only during continuous trading - the only time orders fill."""
         return self.state_at(dt) is MarketState.CONTINUOUS
 
-    def in_square_off_window(
-        self, dt: datetime, buffer_minutes: int = DEFAULT_SQUARE_OFF_BUFFER_MINUTES
-    ) -> bool:
+    def in_square_off_window(self, dt: datetime, buffer_minutes: int = DEFAULT_SQUARE_OFF_BUFFER_MINUTES) -> bool:
         """True from `square_off_start` up to continuous close on a trading day.
 
         The safety monitor exits open MIS positions and blocks new MIS intents

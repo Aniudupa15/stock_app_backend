@@ -132,7 +132,9 @@ class OrderManagementSystem:
         exit_side = Side.SELL if bracket.direction == 1 else Side.BUY
         if bracket.spec.stop_loss is not None:
             bracket.current_sl = bracket.spec.stop_loss
-            bracket.sl_order_id = await self._place_child(bracket, exit_side, OrderType.SL_M, trigger=bracket.spec.stop_loss)
+            bracket.sl_order_id = await self._place_child(
+                bracket, exit_side, OrderType.SL_M, trigger=bracket.spec.stop_loss
+            )
         if bracket.spec.target is not None:
             bracket.target_order_id = await self._place_child(
                 bracket, exit_side, OrderType.LIMIT, price=bracket.spec.target
