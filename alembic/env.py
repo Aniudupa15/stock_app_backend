@@ -4,7 +4,8 @@ from logging.config import fileConfig
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-import app.models  # noqa: F401 - registers every model on Base.metadata
+import app.models  # noqa: F401 - registers every data-service model on Base.metadata
+import services.trading_service.persistence.models  # noqa: F401 - registers the trading-schema models
 from alembic import context
 from app.core.config import get_settings
 from app.models.base import Base
