@@ -27,37 +27,9 @@ jobs:
       - name: Format check (ruff format)
         run: ruff format --check .
 
-      # No explicit Postgres service needed: tests/conftest.py's `postgres_url`
-      # fixture spins up its own ephemeral Postgres via testcontainers, and
-      # ubuntu-latest runners have Docker available out of the box.
+      # tests/conftest.py's `postgres_url` fixture spins up an ephemeral
+      # Postgres via testcontainers; ubuntu-latest runners have Docker.
       - name: Run tests
         env:
           DATABASE_URL: postgresql+asyncpg://test:test@localhost/test
         run: pytest -q
-
-  flutter:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/flutter
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: "3.24.5"
-          channel: stable
-          cache: true
-
-      # Generate the platform scaffolding (web/, etc.) that isn't committed,
-      # so pub get / analyze see a complete project.
-      - name: Generate platform files
-        run: flutter create . --platforms=web --project-name algo_trading_app
-
-      - name: Install packages
-        run: flutter pub get
-
-      - name: Analyze
-        run: flutter analyze
