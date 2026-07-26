@@ -111,6 +111,22 @@ def create_app() -> FastAPI:
 
     app.include_router(v1_router, prefix="/api/v1")
 
+    # Mount the trading-platform API (/trading/*) into the same app so a single
+    # deployment serves both the data API and the trading API - they already
+    # share this database and JWT auth. For LIVE trading, split trading_service
+    # into its own deployment with a static egress IP (see docs/trading-platform).
+    from services.trading_service.api import accounts as _trading_accounts
+    from services.trading_service.api import backtest as _trading_backtest
+    from services.trading_service.api import broker as _trading_broker
+    from services.trading_service.api import paper as _trading_paper
+    from services.trading_service.api import strategies as _trading_strategies
+
+    app.include_router(_trading_accounts.router)
+    app.include_router(_trading_strategies.router)
+    app.include_router(_trading_backtest.router)
+    app.include_router(_trading_paper.router)
+    app.include_router(_trading_broker.router)
+
     # Request count/latency/in-flight gauges at GET /metrics, standard
     # Prometheus exposition format - unauthenticated by convention (scraped
     # by infrastructure, not end users).
