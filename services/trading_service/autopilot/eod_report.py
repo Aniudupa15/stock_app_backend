@@ -39,6 +39,28 @@ class EodReport:
         }
 
 
+def portfolio_summary(trades: list[Trade]) -> dict:
+    """Aggregate over ALL given trades (not day-filtered) - the account view."""
+    n = len(trades)
+    wins = [t for t in trades if t.pnl_net > 0]
+    net = sum((t.pnl_net for t in trades), Decimal("0"))
+    gross = sum((t.pnl_gross for t in trades), Decimal("0"))
+    charges = sum((t.charges_total for t in trades), Decimal("0"))
+    best = max(trades, key=lambda t: t.pnl_net, default=None)
+    worst = min(trades, key=lambda t: t.pnl_net, default=None)
+    return {
+        "total_trades": n,
+        "wins": len(wins),
+        "losses": n - len(wins),
+        "win_rate": round(len(wins) / n, 4) if n else 0.0,
+        "gross_pnl": str(gross),
+        "charges_total": str(charges),
+        "net_pnl": str(net),
+        "best": {"symbol": best.symbol, "pnl": str(best.pnl_net)} if best else None,
+        "worst": {"symbol": worst.symbol, "pnl": str(worst.pnl_net)} if worst else None,
+    }
+
+
 def build_eod_report(trades: list[Trade], day: date) -> EodReport:
     """Aggregate the trades closed on `day` into a report."""
     todays = [t for t in trades if t.exit_ts is not None and t.exit_ts.date() == day]
