@@ -1,4 +1,4 @@
-/// Plain data models mirroring the trading-service API responses.
+// Plain data models mirroring the trading-service API responses.
 
 class Account {
   Account({required this.id, required this.mode, required this.virtualBalance, required this.startingBalance});
