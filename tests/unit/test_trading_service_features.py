@@ -20,7 +20,16 @@ NO_SLIP = SlippageModel(base_bps=Decimal("0"), impact_coeff_bps=Decimal("0"), il
 def _bars(closes: list[float]) -> list[Bar]:
     out = []
     for i, c in enumerate(closes):
-        out.append(Bar(day=date(2026, 1, 1) + _days(i), open=Decimal(str(c)), high=Decimal(str(c + 1)), low=Decimal(str(c - 1)), close=Decimal(str(c)), volume=100000))
+        out.append(
+            Bar(
+                day=date(2026, 1, 1) + _days(i),
+                open=Decimal(str(c)),
+                high=Decimal(str(c + 1)),
+                low=Decimal(str(c - 1)),
+                close=Decimal(str(c)),
+                volume=100000,
+            )
+        )
     return out
 
 
@@ -31,7 +40,16 @@ def _days(n):
 
 
 def test_ohlcv_to_backtest_bar_mapping():
-    ohlcv = [OhlcvBar(trade_date=date(2026, 1, 5), open=Decimal("100"), high=Decimal("102"), low=Decimal("99"), close=Decimal("101"), volume=12345)]
+    ohlcv = [
+        OhlcvBar(
+            trade_date=date(2026, 1, 5),
+            open=Decimal("100"),
+            high=Decimal("102"),
+            low=Decimal("99"),
+            close=Decimal("101"),
+            volume=12345,
+        )
+    ]
     bars = to_backtest_bars(ohlcv)
     assert bars[0].day == date(2026, 1, 5)
     assert bars[0].close == Decimal("101")

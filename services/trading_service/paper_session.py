@@ -86,9 +86,9 @@ async def run_paper_session(
     builder = IndicatorFeatureBuilder(bars)
     starting = Decimal(account.virtual_balance) if account.virtual_balance is not None else _DEFAULT_CASH
 
-    result = await Backtester(
-        symbol=symbol, strategy=strategy, starting_cash=starting, account_id=account.id
-    ).run(bars, builder)
+    result = await Backtester(symbol=symbol, strategy=strategy, starting_cash=starting, account_id=account.id).run(
+        bars, builder
+    )
 
     trade_repo = TradeRepository(session)
     for trade in result.trades:

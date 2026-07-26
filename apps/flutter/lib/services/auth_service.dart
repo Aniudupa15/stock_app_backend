@@ -19,5 +19,16 @@ class AuthService {
     await _client.setToken(token);
   }
 
+  /// Registers a new user and logs them in (the endpoint returns a token pair).
+  Future<void> register(String email, String password, String displayName) async {
+    final data = await _client.post(
+      '/api/v1/auth/register',
+      body: {'email': email, 'password': password, 'display_name': displayName},
+      auth: false,
+    );
+    final token = (data as Map)['access_token'] as String;
+    await _client.setToken(token);
+  }
+
   Future<void> logout() => _client.clearToken();
 }

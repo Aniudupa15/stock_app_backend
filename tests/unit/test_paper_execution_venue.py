@@ -51,7 +51,9 @@ def _q(ltp="1000", **kw):
 
 async def test_market_buy_fills_and_debits_cash():
     quote = _q("1000")
-    venue = PaperExecutionVenue(ACCOUNT, FakeQuotes(quote), TradingCalendar(), lambda: MON, starting_cash=Decimal("100000"), slippage=NO_SLIP)
+    venue = PaperExecutionVenue(
+        ACCOUNT, FakeQuotes(quote), TradingCalendar(), lambda: MON, starting_cash=Decimal("100000"), slippage=NO_SLIP
+    )
     ack = await venue.place(_intent(side=Side.BUY, quantity=10, product=Product.MIS))
     assert ack.state is OrderState.COMPLETE
     charges = compute(Side.BUY, Product.MIS, 10, Decimal("1000"))
@@ -66,7 +68,9 @@ async def test_market_buy_fills_and_debits_cash():
 async def test_market_closed_rejects():
     quote = _q("1000")
     closed = datetime(2026, 1, 5, 8, 0)  # before pre-open
-    venue = PaperExecutionVenue(ACCOUNT, FakeQuotes(quote), TradingCalendar(), lambda: closed, starting_cash=Decimal("100000"))
+    venue = PaperExecutionVenue(
+        ACCOUNT, FakeQuotes(quote), TradingCalendar(), lambda: closed, starting_cash=Decimal("100000")
+    )
     ack = await venue.place(_intent())
     assert ack.state is OrderState.REJECTED
     assert ack.reason == "market closed"
@@ -74,7 +78,9 @@ async def test_market_closed_rejects():
 
 async def test_circuit_locked_rejects_buy_at_upper_band():
     quote = _q("1050", upper_band=Decimal("1050"))
-    venue = PaperExecutionVenue(ACCOUNT, FakeQuotes(quote), TradingCalendar(), lambda: MON, starting_cash=Decimal("100000"))
+    venue = PaperExecutionVenue(
+        ACCOUNT, FakeQuotes(quote), TradingCalendar(), lambda: MON, starting_cash=Decimal("100000")
+    )
     ack = await venue.place(_intent(side=Side.BUY))
     assert ack.state is OrderState.REJECTED
     assert ack.reason == "circuit locked"
@@ -83,7 +89,9 @@ async def test_circuit_locked_rejects_buy_at_upper_band():
 async def test_round_trip_realized_pnl_and_cash():
     # Buy 100 @ 1000, then sell 100 @ 1010 (delivery). Realized = (1010-1000)*100 = 1000 gross.
     quotes = FakeQuotes(_q("1000"))
-    venue = PaperExecutionVenue(ACCOUNT, quotes, TradingCalendar(), lambda: MON, starting_cash=Decimal("1000000"), slippage=NO_SLIP)
+    venue = PaperExecutionVenue(
+        ACCOUNT, quotes, TradingCalendar(), lambda: MON, starting_cash=Decimal("1000000"), slippage=NO_SLIP
+    )
     await venue.place(_intent(side=Side.BUY, quantity=100, product=Product.CNC))
     quotes.set(_q("1010"))
     await venue.place(_intent(side=Side.SELL, quantity=100, product=Product.CNC))
@@ -98,7 +106,9 @@ async def test_round_trip_realized_pnl_and_cash():
 
 async def test_resting_limit_buy_fills_on_tick_when_price_drops():
     quotes = FakeQuotes(_q("1000"))
-    venue = PaperExecutionVenue(ACCOUNT, quotes, TradingCalendar(), lambda: MON, starting_cash=Decimal("100000"), slippage=NO_SLIP)
+    venue = PaperExecutionVenue(
+        ACCOUNT, quotes, TradingCalendar(), lambda: MON, starting_cash=Decimal("100000"), slippage=NO_SLIP
+    )
     ack = await venue.place(_intent(side=Side.BUY, order_type=OrderType.LIMIT, price=Decimal("990"), quantity=10))
     assert ack.state is OrderState.OPEN  # not marketable at 1000
     assert (await venue.positions()) == []
@@ -110,12 +120,16 @@ async def test_resting_limit_buy_fills_on_tick_when_price_drops():
 
 async def test_resting_stop_loss_sell_triggers_on_drop():
     quotes = FakeQuotes(_q("1000"))
-    venue = PaperExecutionVenue(ACCOUNT, quotes, TradingCalendar(), lambda: MON, starting_cash=Decimal("100000"), slippage=NO_SLIP)
+    venue = PaperExecutionVenue(
+        ACCOUNT, quotes, TradingCalendar(), lambda: MON, starting_cash=Decimal("100000"), slippage=NO_SLIP
+    )
     # Long already established
     await venue.place(_intent(side=Side.BUY, quantity=10, product=Product.MIS))
     # SL-M sell with trigger 980
     ack = await venue.place(
-        _intent(side=Side.SELL, order_type=OrderType.SL_M, trigger_price=Decimal("980"), quantity=10, product=Product.MIS)
+        _intent(
+            side=Side.SELL, order_type=OrderType.SL_M, trigger_price=Decimal("980"), quantity=10, product=Product.MIS
+        )
     )
     assert ack.state is OrderState.OPEN
     await venue.on_tick(_q("979"))  # breaches stop
@@ -145,7 +159,9 @@ async def test_event_sink_receives_fill_events():
 async def test_slippage_makes_buy_fill_higher():
     quotes = FakeQuotes(_q("1000", day_volume=1_000_000))
     slip = SlippageModel(base_bps=Decimal("10"), impact_coeff_bps=Decimal("0"), illiquid_penalty_bps=Decimal("0"))
-    venue = PaperExecutionVenue(ACCOUNT, quotes, TradingCalendar(), lambda: MON, starting_cash=Decimal("10000000"), slippage=slip)
+    venue = PaperExecutionVenue(
+        ACCOUNT, quotes, TradingCalendar(), lambda: MON, starting_cash=Decimal("10000000"), slippage=slip
+    )
     await venue.place(_intent(side=Side.BUY, quantity=10))
     # 10 bps above 1000 = 1001
     positions = await venue.positions()

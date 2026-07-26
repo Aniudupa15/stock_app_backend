@@ -89,7 +89,15 @@ async def test_order_update_flows_to_event_sink_linked_to_intent():
     venue.set_event_sink(events.append)
     intent = _intent()
     ack = await venue.place(intent)
-    venue.handle_order_update({"order_id": ack.venue_order_id, "status": "COMPLETE", "filled_quantity": 10, "pending_quantity": 0, "average_price": 1500})
+    venue.handle_order_update(
+        {
+            "order_id": ack.venue_order_id,
+            "status": "COMPLETE",
+            "filled_quantity": 10,
+            "pending_quantity": 0,
+            "average_price": 1500,
+        }
+    )
     assert len(events) == 1
     assert events[0].state is OrderState.COMPLETE
     assert events[0].intent_id == intent.intent_id
