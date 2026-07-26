@@ -35,7 +35,9 @@ def _engine(profile=None, quantity=10):
         async def get_quote(self, symbol):
             return quotes_holder["q"]
 
-    venue = PaperExecutionVenue(ACCOUNT, Quotes(), TradingCalendar(), lambda: MON, starting_cash=Decimal("10000000"), slippage=NO_SLIP)
+    venue = PaperExecutionVenue(
+        ACCOUNT, Quotes(), TradingCalendar(), lambda: MON, starting_cash=Decimal("10000000"), slippage=NO_SLIP
+    )
     oms = OrderManagementSystem(venue, lambda: MON)
     strategy = Strategy(
         name="EMA breakout",

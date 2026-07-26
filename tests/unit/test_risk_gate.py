@@ -26,14 +26,21 @@ def _state(**kw):
 
 
 def test_allows_clean_entry():
-    v = GATE.evaluate(_intent(), state=_state(), profile=RiskProfile(), now=MON_OPEN, calendar=CAL, entry_price=Decimal("1000"))
+    v = GATE.evaluate(
+        _intent(), state=_state(), profile=RiskProfile(), now=MON_OPEN, calendar=CAL, entry_price=Decimal("1000")
+    )
     assert v.decision is RiskDecision.ALLOW
     assert v.quantity == 100
 
 
 def test_kill_switch_rejects_entry():
     v = GATE.evaluate(
-        _intent(), state=_state(), profile=RiskProfile(kill_switch=True), now=MON_OPEN, calendar=CAL, entry_price=Decimal("1000")
+        _intent(),
+        state=_state(),
+        profile=RiskProfile(kill_switch=True),
+        now=MON_OPEN,
+        calendar=CAL,
+        entry_price=Decimal("1000"),
     )
     assert v.decision is RiskDecision.REJECT
     assert v.reason == "kill switch engaged"
@@ -55,14 +62,23 @@ def test_exit_allowed_even_with_kill_switch():
 
 def test_market_closed_rejects():
     closed = datetime(2026, 1, 5, 8, 0)
-    v = GATE.evaluate(_intent(), state=_state(), profile=RiskProfile(), now=closed, calendar=CAL, entry_price=Decimal("1000"))
+    v = GATE.evaluate(
+        _intent(), state=_state(), profile=RiskProfile(), now=closed, calendar=CAL, entry_price=Decimal("1000")
+    )
     assert v.decision is RiskDecision.REJECT
     assert v.reason == "market closed"
 
 
 def test_mis_rejected_in_square_off_window():
     sq = datetime(2026, 1, 5, 15, 20)  # inside default 15:15-15:30 window
-    v = GATE.evaluate(_intent(product=Product.MIS), state=_state(), profile=RiskProfile(), now=sq, calendar=CAL, entry_price=Decimal("1000"))
+    v = GATE.evaluate(
+        _intent(product=Product.MIS),
+        state=_state(),
+        profile=RiskProfile(),
+        now=sq,
+        calendar=CAL,
+        entry_price=Decimal("1000"),
+    )
     assert v.decision is RiskDecision.REJECT
     assert v.reason == "within square-off window"
 
@@ -70,7 +86,12 @@ def test_mis_rejected_in_square_off_window():
 def test_daily_loss_limit_rejects():
     state = _state(realized_pnl_today=Decimal("-5000"))
     v = GATE.evaluate(
-        _intent(), state=state, profile=RiskProfile(max_daily_loss=Decimal("5000")), now=MON_OPEN, calendar=CAL, entry_price=Decimal("1000")
+        _intent(),
+        state=state,
+        profile=RiskProfile(max_daily_loss=Decimal("5000")),
+        now=MON_OPEN,
+        calendar=CAL,
+        entry_price=Decimal("1000"),
     )
     assert v.decision is RiskDecision.REJECT
     assert v.reason == "daily loss limit reached"
@@ -86,7 +107,14 @@ def test_cooldown_after_consecutive_losses():
 
 def test_max_open_positions_blocks_new_symbol():
     state = _state(open_positions_count=5, current_net_qty=0)
-    v = GATE.evaluate(_intent(), state=state, profile=RiskProfile(max_open_positions=5), now=MON_OPEN, calendar=CAL, entry_price=Decimal("1000"))
+    v = GATE.evaluate(
+        _intent(),
+        state=state,
+        profile=RiskProfile(max_open_positions=5),
+        now=MON_OPEN,
+        calendar=CAL,
+        entry_price=Decimal("1000"),
+    )
     assert v.decision is RiskDecision.REJECT
     assert v.reason == "max open positions reached"
 
@@ -96,7 +124,13 @@ def test_position_sizing_resizes_down_by_per_trade_risk():
     state = _state(equity=Decimal("1000000"))
     profile = RiskProfile(per_trade_risk_pct=Decimal("1"))
     v = GATE.evaluate(
-        _intent(qty=1000), state=state, profile=profile, now=MON_OPEN, calendar=CAL, entry_price=Decimal("1000"), stop_loss=Decimal("980")
+        _intent(qty=1000),
+        state=state,
+        profile=profile,
+        now=MON_OPEN,
+        calendar=CAL,
+        entry_price=Decimal("1000"),
+        stop_loss=Decimal("980"),
     )
     assert v.decision is RiskDecision.RESIZE
     assert v.quantity == 500
@@ -106,7 +140,9 @@ def test_position_sizing_resizes_down_by_per_trade_risk():
 def test_insufficient_margin_resizes_down():
     # cash only 50,000 at 1000/share -> max 50 shares
     state = _state(available_cash=Decimal("50000"))
-    v = GATE.evaluate(_intent(qty=100), state=state, profile=RiskProfile(), now=MON_OPEN, calendar=CAL, entry_price=Decimal("1000"))
+    v = GATE.evaluate(
+        _intent(qty=100), state=state, profile=RiskProfile(), now=MON_OPEN, calendar=CAL, entry_price=Decimal("1000")
+    )
     assert v.decision is RiskDecision.RESIZE
     assert v.quantity == 50
     assert v.reason == "insufficient margin"
@@ -114,5 +150,7 @@ def test_insufficient_margin_resizes_down():
 
 def test_zero_affordable_rejects():
     state = _state(available_cash=Decimal("500"))
-    v = GATE.evaluate(_intent(qty=100), state=state, profile=RiskProfile(), now=MON_OPEN, calendar=CAL, entry_price=Decimal("1000"))
+    v = GATE.evaluate(
+        _intent(qty=100), state=state, profile=RiskProfile(), now=MON_OPEN, calendar=CAL, entry_price=Decimal("1000")
+    )
     assert v.decision is RiskDecision.REJECT

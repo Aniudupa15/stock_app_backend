@@ -63,7 +63,9 @@ class TradingAccountRepository(_Base):
 
     async def update_balance(self, account_id: uuid.UUID, virtual_balance: Decimal) -> None:
         await self._session.execute(
-            update(TradingAccountModel).where(TradingAccountModel.id == account_id).values(virtual_balance=virtual_balance)
+            update(TradingAccountModel)
+            .where(TradingAccountModel.id == account_id)
+            .values(virtual_balance=virtual_balance)
         )
         await self._session.commit()
 
@@ -213,7 +215,13 @@ class OrderRepository(_Base):
         return model
 
     async def update_from_event(
-        self, venue: str, venue_order_id: str, state: str, filled_qty: int, pending_qty: int, average_price: Decimal | None
+        self,
+        venue: str,
+        venue_order_id: str,
+        state: str,
+        filled_qty: int,
+        pending_qty: int,
+        average_price: Decimal | None,
     ) -> None:
         await self._session.execute(
             update(OrderModel)
@@ -229,7 +237,14 @@ class OrderRepository(_Base):
 
 class FillRepository(_Base):
     async def add(
-        self, order_id: uuid.UUID, symbol: str, side: str, qty: int, price: Decimal, charges: dict | None, ts: datetime | None = None
+        self,
+        order_id: uuid.UUID,
+        symbol: str,
+        side: str,
+        qty: int,
+        price: Decimal,
+        charges: dict | None,
+        ts: datetime | None = None,
     ) -> None:
         model = FillModel(order_id=order_id, symbol=symbol, side=side, qty=qty, price=price, charges=charges)
         if ts is not None:
@@ -283,11 +298,18 @@ class TradeRepository(_Base):
 
 
 class PositionRepository(_Base):
-    async def upsert(self, account_id: uuid.UUID, symbol: str, product: str, net_qty: int, avg_price: Decimal, realized_pnl: Decimal) -> None:
+    async def upsert(
+        self, account_id: uuid.UUID, symbol: str, product: str, net_qty: int, avg_price: Decimal, realized_pnl: Decimal
+    ) -> None:
         stmt = (
             pg_insert(PositionModel)
             .values(
-                account_id=account_id, symbol=symbol, product=product, net_qty=net_qty, avg_price=avg_price, realized_pnl=realized_pnl
+                account_id=account_id,
+                symbol=symbol,
+                product=product,
+                net_qty=net_qty,
+                avg_price=avg_price,
+                realized_pnl=realized_pnl,
             )
             .on_conflict_do_update(
                 constraint="uq_positions_account_symbol_product",
@@ -314,7 +336,9 @@ class PositionRepository(_Base):
 
 
 class HoldingRepository(_Base):
-    async def upsert(self, account_id: uuid.UUID, symbol: str, quantity: int, avg_price: Decimal, ltp: Decimal | None) -> None:
+    async def upsert(
+        self, account_id: uuid.UUID, symbol: str, quantity: int, avg_price: Decimal, ltp: Decimal | None
+    ) -> None:
         stmt = (
             pg_insert(HoldingModel)
             .values(account_id=account_id, symbol=symbol, quantity=quantity, avg_price=avg_price, ltp=ltp)
@@ -331,7 +355,14 @@ class HoldingRepository(_Base):
 
 
 class EquitySnapshotRepository(_Base):
-    async def append(self, account_id: uuid.UUID, equity: Decimal, cash: Decimal, unrealized: Decimal | None = None, ts: datetime | None = None) -> None:
+    async def append(
+        self,
+        account_id: uuid.UUID,
+        equity: Decimal,
+        cash: Decimal,
+        unrealized: Decimal | None = None,
+        ts: datetime | None = None,
+    ) -> None:
         model = EquitySnapshotModel(account_id=account_id, equity=equity, cash=cash, unrealized=unrealized)
         if ts is not None:
             model.ts = ts
@@ -339,7 +370,11 @@ class EquitySnapshotRepository(_Base):
         await self._session.commit()
 
     async def curve(self, account_id: uuid.UUID) -> list[EquitySnapshotModel]:
-        stmt = select(EquitySnapshotModel).where(EquitySnapshotModel.account_id == account_id).order_by(EquitySnapshotModel.ts.asc())
+        stmt = (
+            select(EquitySnapshotModel)
+            .where(EquitySnapshotModel.account_id == account_id)
+            .order_by(EquitySnapshotModel.ts.asc())
+        )
         return list((await self._session.execute(stmt)).scalars().all())
 
 
@@ -375,7 +410,12 @@ class RiskEventRepository(_Base):
 
 class AuditLogRepository(_Base):
     async def append(
-        self, actor: str, event_type: str, account_id: uuid.UUID | None = None, ref_id: uuid.UUID | None = None, payload: dict | None = None
+        self,
+        actor: str,
+        event_type: str,
+        account_id: uuid.UUID | None = None,
+        ref_id: uuid.UUID | None = None,
+        payload: dict | None = None,
     ) -> None:
         self._session.add(
             AuditLogModel(account_id=account_id, actor=actor, event_type=event_type, ref_id=ref_id, payload=payload)
@@ -383,7 +423,12 @@ class AuditLogRepository(_Base):
         await self._session.commit()
 
     async def list_for_account(self, account_id: uuid.UUID, limit: int = 200) -> list[AuditLogModel]:
-        stmt = select(AuditLogModel).where(AuditLogModel.account_id == account_id).order_by(AuditLogModel.ts.desc()).limit(limit)
+        stmt = (
+            select(AuditLogModel)
+            .where(AuditLogModel.account_id == account_id)
+            .order_by(AuditLogModel.ts.desc())
+            .limit(limit)
+        )
         return list((await self._session.execute(stmt)).scalars().all())
 
 

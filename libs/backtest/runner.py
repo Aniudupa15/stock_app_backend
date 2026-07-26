@@ -83,7 +83,12 @@ class Backtester:
                 return quote_holder["quote"]
 
         venue = PaperExecutionVenue(
-            self._account_id, _Quotes(), self._calendar, clock, starting_cash=self._starting_cash, slippage=self._slippage
+            self._account_id,
+            _Quotes(),
+            self._calendar,
+            clock,
+            starting_cash=self._starting_cash,
+            slippage=self._slippage,
         )
         oms = OrderManagementSystem(venue, clock)
         risk_gate = RiskGate()

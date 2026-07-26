@@ -45,7 +45,9 @@ class BrokerSessionModel(Base, TimestampMixin):
     __table_args__ = (UniqueConstraint("user_id", "broker", name="uq_broker_sessions_user_broker"), {"schema": SCHEMA})
 
     id: Mapped[uuid.UUID] = _pk()
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
     broker: Mapped[str] = mapped_column(String(32), nullable=False)
     api_key_enc: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     api_secret_enc: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
@@ -59,7 +61,9 @@ class TradingAccountModel(Base, TimestampMixin):
     __table_args__ = ({"schema": SCHEMA},)
 
     id: Mapped[uuid.UUID] = _pk()
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
     mode: Mapped[str] = mapped_column(String(8), nullable=False, server_default="PAPER")
     broker_session_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey(f"{SCHEMA}.broker_sessions.id", ondelete="SET NULL"), nullable=True
@@ -74,7 +78,9 @@ class StrategyModel(Base, TimestampMixin):
     __table_args__ = ({"schema": SCHEMA},)
 
     id: Mapped[uuid.UUID] = _pk()
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     rule_tree: Mapped[dict] = mapped_column(JSONB, nullable=False)
     timeframe: Mapped[str] = mapped_column(String(8), nullable=False, server_default="1D")
