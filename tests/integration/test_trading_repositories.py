@@ -56,7 +56,9 @@ async def test_risk_profile_upsert_is_idempotent_per_account(db_session):
 async def test_strategy_crud(db_session):
     repo = StrategyRepository(db_session)
     rule = {"op": "GT", "left": {"feature": "close"}, "right": {"feature": "EMA_20"}}
-    strat = await repo.create(DEFAULT_USER_ID, name="EMA breakout", rule_tree=rule, side="BUY", product="MIS", quantity=10)
+    strat = await repo.create(
+        DEFAULT_USER_ID, name="EMA breakout", rule_tree=rule, side="BUY", product="MIS", quantity=10
+    )
     assert (await repo.get(strat.id, DEFAULT_USER_ID)).name == "EMA breakout"
     await repo.update(strat.id, DEFAULT_USER_ID, status="VALIDATED")
     assert (await repo.get(strat.id, DEFAULT_USER_ID)).status == "VALIDATED"
@@ -135,12 +137,17 @@ async def test_position_upsert_and_equity_curve(db_session):
 async def test_backtest_signal_and_audit(db_session):
     account = await _account(db_session)
     bt_id = await BacktestRepository(db_session).save(
-        symbol="INFY", starting_cash=Decimal("1000000"), final_equity=Decimal("1050000"), metrics={"win_rate": 0.6, "sharpe": 1.2}
+        symbol="INFY",
+        starting_cash=Decimal("1000000"),
+        final_equity=Decimal("1050000"),
+        metrics={"win_rate": 0.6, "sharpe": 1.2},
     )
     assert bt_id is not None
     assert len(await BacktestRepository(db_session).list_recent()) >= 1
 
-    signal = Signal(None, "INFY", Side.BUY, Decimal("1000"), Decimal("980"), [Decimal("1020")], Decimal("75"), "EMA cross")
+    signal = Signal(
+        None, "INFY", Side.BUY, Decimal("1000"), Decimal("980"), [Decimal("1020")], Decimal("75"), "EMA cross"
+    )
     await SignalRepository(db_session).add(signal, account.id)
     assert len(await SignalRepository(db_session).list_for_account(account.id)) == 1
 

@@ -1,0 +1,20 @@
+# Netlify build for the Flutter web app.
+#
+# Netlify's build image has no Flutter SDK, so netlify_build.sh installs it,
+# enables web, and builds with the backend URLs baked in via --dart-define.
+#
+# Set these environment variables in the Netlify site settings (Build & deploy
+# -> Environment) to your deployed Render URLs:
+#   DATA_BASE_URL     e.g. https://data-service.onrender.com
+#   TRADING_BASE_URL  e.g. https://trading-service.onrender.com
+
+[build]
+  base = "apps/flutter"
+  command = "bash netlify_build.sh"
+  publish = "build/web"
+
+# Single-page app: every route falls back to index.html.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

@@ -85,7 +85,9 @@ def test_charges_as_dict_roundtrips_total():
     assert set(d) == {"brokerage", "stt", "exchange_txn", "sebi", "stamp_duty", "gst", "dp", "total"}
 
 
-@pytest.mark.parametrize("qty,price", [(0, Decimal("100")), (-1, Decimal("100")), (10, Decimal("0")), (10, Decimal("-5"))])
+@pytest.mark.parametrize(
+    "qty,price", [(0, Decimal("100")), (-1, Decimal("100")), (10, Decimal("0")), (10, Decimal("-5"))]
+)
 def test_rejects_non_positive_inputs(qty, price):
     with pytest.raises(ValueError):
         compute(Side.BUY, Product.MIS, qty, price)

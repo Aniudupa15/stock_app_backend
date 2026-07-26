@@ -15,7 +15,9 @@ RULE = {"op": "GT", "left": {"feature": "close"}, "right": {"feature": "EMA_20"}
 
 
 def _bar(d, o, h, low, c, v=100000):
-    return Bar(day=d, open=Decimal(str(o)), high=Decimal(str(h)), low=Decimal(str(low)), close=Decimal(str(c)), volume=v)
+    return Bar(
+        day=d, open=Decimal(str(o)), high=Decimal(str(h)), low=Decimal(str(low)), close=Decimal(str(c)), volume=v
+    )
 
 
 def _strategy():
@@ -33,7 +35,7 @@ async def test_backtest_target_hit_produces_winning_trade():
     bars = [
         _bar(date(2026, 1, 5), 100, 100, 100, 100),  # no entry (close 100 !> EMA 101)
         _bar(date(2026, 1, 6), 100, 100, 100, 100),  # entry at close 100 (EMA 99)
-        _bar(date(2026, 1, 7), 102, 106, 99, 104),   # intrabar high 106 >= target 105 -> fill
+        _bar(date(2026, 1, 7), 102, 106, 99, 104),  # intrabar high 106 >= target 105 -> fill
     ]
 
     # Features per bar index; bar 2 set NOT to re-fire so exactly one trade.
@@ -60,7 +62,7 @@ async def test_backtest_target_hit_produces_winning_trade():
 async def test_backtest_stop_loss_hit_produces_losing_trade():
     bars = [
         _bar(date(2026, 1, 6), 100, 100, 100, 100),  # entry at close 100
-        _bar(date(2026, 1, 7), 99, 100, 94, 96),     # intrabar low 94 <= SL 95 -> stop
+        _bar(date(2026, 1, 7), 99, 100, 94, 96),  # intrabar low 94 <= SL 95 -> stop
     ]
     features = {
         0: ({"close": 100, "EMA_20": 99}, None),

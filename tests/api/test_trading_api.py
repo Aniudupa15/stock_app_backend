@@ -48,14 +48,20 @@ def _weekdays(start: date, n: int) -> list[date]:
 
 async def _seed_history(db_session, symbol: str, n: int = 45) -> None:
     await SqlAlchemyStockRepository(db_session).upsert_universe(
-        [StockMasterRecord(symbol=symbol, isin=None, name=f"{symbol} Ltd", series="EQ", listing_date=None, face_value=None)]
+        [
+            StockMasterRecord(
+                symbol=symbol, isin=None, name=f"{symbol} Ltd", series="EQ", listing_date=None, face_value=None
+            )
+        ]
     )
     await db_session.commit()
     days = _weekdays(date(2025, 1, 6), n)
     records = []
     for i, d in enumerate(days):
         c = Decimal(100 + i)  # steady uptrend so close > SMA_20 after warmup
-        records.append(BhavcopyRecord(symbol=symbol, trade_date=d, open=c, high=c + 1, low=c - 1, close=c, volume=100000))
+        records.append(
+            BhavcopyRecord(symbol=symbol, trade_date=d, open=c, high=c + 1, low=c - 1, close=c, volume=100000)
+        )
     await SqlAlchemyHistoricalPriceRepository(db_session).bulk_upsert_bars(records)
     await db_session.commit()
 
@@ -108,7 +114,14 @@ async def test_account_ownership_404_for_unknown(trading_client):
 async def test_strategy_crud_and_rule_validation(trading_client):
     created = await trading_client.post(
         "/trading/strategies",
-        json={"name": "EMA breakout", "rule_tree": EMA_RULE, "side": "BUY", "product": "CNC", "quantity": 10, "target_pct": "2"},
+        json={
+            "name": "EMA breakout",
+            "rule_tree": EMA_RULE,
+            "side": "BUY",
+            "product": "CNC",
+            "quantity": 10,
+            "target_pct": "2",
+        },
     )
     assert created.status_code == 201
     sid = created.json()["id"]
@@ -133,7 +146,15 @@ async def test_backtest_happy_path_runs_over_seeded_history(trading_client, db_s
     await _seed_history(db_session, "TESTCO", n=45)
     resp = await trading_client.post(
         "/trading/backtest",
-        json={"symbol": "TESTCO", "rule_tree": EMA_RULE, "product": "CNC", "quantity": 10, "target_pct": "1", "stop_loss_pct": "5", "starting_cash": "1000000"},
+        json={
+            "symbol": "TESTCO",
+            "rule_tree": EMA_RULE,
+            "product": "CNC",
+            "quantity": 10,
+            "target_pct": "1",
+            "stop_loss_pct": "5",
+            "starting_cash": "1000000",
+        },
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -151,7 +172,15 @@ async def test_paper_run_persists_journal_and_updates_balance(trading_client, db
     strat = (
         await trading_client.post(
             "/trading/strategies",
-            json={"name": "paper strat", "rule_tree": EMA_RULE, "side": "BUY", "product": "CNC", "quantity": 10, "target_pct": "1", "stop_loss_pct": "5"},
+            json={
+                "name": "paper strat",
+                "rule_tree": EMA_RULE,
+                "side": "BUY",
+                "product": "CNC",
+                "quantity": 10,
+                "target_pct": "1",
+                "stop_loss_pct": "5",
+            },
         )
     ).json()
 

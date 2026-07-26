@@ -39,7 +39,14 @@ class FakeKite:
     def positions(self):
         return {
             "net": [
-                {"tradingsymbol": "INFY", "product": "MIS", "quantity": 10, "average_price": 1500.5, "realised": 0, "last_price": 1512.0}
+                {
+                    "tradingsymbol": "INFY",
+                    "product": "MIS",
+                    "quantity": 10,
+                    "average_price": 1500.5,
+                    "realised": 0,
+                    "last_price": 1512.0,
+                }
             ]
         }
 
@@ -143,7 +150,13 @@ async def test_available_margin_reads_live_balance():
 def test_parse_order_update_builds_event_linked_to_intent():
     adapter = _adapter()
     intent_id = uuid4()
-    payload = {"order_id": "2500001", "status": "COMPLETE", "filled_quantity": 10, "pending_quantity": 0, "average_price": 1501.25}
+    payload = {
+        "order_id": "2500001",
+        "status": "COMPLETE",
+        "filled_quantity": 10,
+        "pending_quantity": 0,
+        "average_price": 1501.25,
+    }
     event = adapter.parse_order_update(payload, {"2500001": intent_id})
     assert event.state is OrderState.COMPLETE
     assert event.intent_id == intent_id

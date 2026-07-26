@@ -38,7 +38,9 @@ def _q(ltp):
 
 def _setup(ltp="1000"):
     quotes = FakeQuotes(_q(ltp))
-    venue = PaperExecutionVenue(ACCOUNT, quotes, TradingCalendar(), lambda: MON, starting_cash=Decimal("10000000"), slippage=NO_SLIP)
+    venue = PaperExecutionVenue(
+        ACCOUNT, quotes, TradingCalendar(), lambda: MON, starting_cash=Decimal("10000000"), slippage=NO_SLIP
+    )
     oms = OrderManagementSystem(venue, lambda: MON)
     return quotes, venue, oms
 
@@ -73,7 +75,10 @@ async def test_target_hit_records_trade_and_cancels_stop():
     assert trade.entry_price == Decimal("1000")
     assert trade.exit_price == Decimal("1020")
     assert trade.pnl_gross == Decimal("200")  # (1020-1000)*10
-    expected_charges = compute(Side.BUY, Product.MIS, 10, Decimal("1000")).total + compute(Side.SELL, Product.MIS, 10, Decimal("1020")).total
+    expected_charges = (
+        compute(Side.BUY, Product.MIS, 10, Decimal("1000")).total
+        + compute(Side.SELL, Product.MIS, 10, Decimal("1020")).total
+    )
     assert trade.charges_total == expected_charges
     assert trade.pnl_net == Decimal("200") - expected_charges
     # position flat after exit
@@ -107,7 +112,10 @@ async def test_rejected_entry_returns_not_accepted():
 async def test_trailing_stop_ratchets_up_on_favorable_move():
     _, venue, oms = _setup("1000")
     res = await oms.submit(
-        _entry(), BracketSpec(stop_loss=Decimal("980"), target=Decimal("1100"), trailing=TrailingSpec(by="PCT", value=Decimal("2")))
+        _entry(),
+        BracketSpec(
+            stop_loss=Decimal("980"), target=Decimal("1100"), trailing=TrailingSpec(by="PCT", value=Decimal("2"))
+        ),
     )
     await oms.process()
     bracket = oms._brackets[res.bracket_id]

@@ -88,6 +88,4 @@ async def complete_login(
     await repo.set_access_token(
         model.id, cipher.encrypt(broker_session.access_token), broker_session.expires_at, "CONNECTED"
     )
-    return BrokerStatusOut(
-        broker=body.broker, connected=True, status="CONNECTED", expires_at=broker_session.expires_at
-    )
+    return BrokerStatusOut(broker=body.broker, connected=True, status="CONNECTED", expires_at=broker_session.expires_at)
