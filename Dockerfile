@@ -11,6 +11,8 @@ WORKDIR /app
 
 COPY --from=builder /install /usr/local
 COPY app ./app
+COPY libs ./libs
+COPY services ./services
 COPY alembic ./alembic
 COPY alembic.ini .
 COPY scripts ./scripts

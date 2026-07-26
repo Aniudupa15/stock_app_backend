@@ -1,0 +1,62 @@
+# Render Blueprint: deploys BOTH backend services + a managed Postgres.
+# Both services build from the same Dockerfile; the trading-service overrides
+# the start command. They share JWT_SECRET_KEY (so tokens issued by the
+# data-service validate on the trading-service, and both derive the same
+# credential-encryption key).
+#
+# Deploy: push this file, then in Render -> "New +" -> "Blueprint", point at
+# this repo. After the first deploy, set CORS_ALLOWED_ORIGINS on BOTH services
+# to your Netlify URL (see docs/trading-platform/deployment.md).
+#
+# Free-tier caveats: web services sleep after ~15 min idle (cold starts);
+# free Postgres is deleted after 30 days. Move to paid plans for anything real.
+
+databases:
+  - name: stockapp-db
+    databaseName: stockapp
+    user: stockapp
+    plan: free
+
+envVarGroups:
+  - name: stockapp-shared
+    envVars:
+      - key: JWT_SECRET_KEY
+        generateValue: true # shared secret -> tokens + credential encryption line up across services
+
+services:
+  - type: web
+    name: data-service
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/v1/healthz
+    envVars:
+      - fromGroup: stockapp-shared
+      - key: DATABASE_URL
+        fromDatabase:
+          name: stockapp-db
+          property: connectionString # postgres:// -> normalized to +asyncpg by the app
+      - key: CACHE_BACKEND
+        value: memory # in-memory cache; add a Render Key Value service later for Redis
+      - key: SCHEDULER_ENABLED
+        value: "false" # NSE sync jobs may be blocked from cloud IPs; enable once data-sourcing is sorted
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false # set to your Netlify site URL, e.g. https://your-app.netlify.app
+
+  - type: web
+    name: trading-service
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    dockerCommand: 'sh -c "alembic upgrade head && uvicorn services.trading_service.api.app:create_trading_app --factory --host 0.0.0.0 --port $PORT"'
+    envVars:
+      - fromGroup: stockapp-shared
+      - key: DATABASE_URL
+        fromDatabase:
+          name: stockapp-db
+          property: connectionString
+      - key: CACHE_BACKEND
+        value: memory
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false # set to your Netlify site URL
