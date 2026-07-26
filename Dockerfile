@@ -28,4 +28,8 @@ EXPOSE $PORT
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["python", "-c", "import os, urllib.request; urllib.request.urlopen(f'http://localhost:{os.environ.get(\"PORT\", \"8000\")}/api/v1/healthz')"]
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Apply any pending schema migrations before serving, so a deploy that ships
+# a new migration (e.g. new tables) never leaves the API querying a table that
+# doesn't exist yet. Safe for the single-instance Render service; if this ever
+# scales to multiple replicas, move migrations to a dedicated release step.
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
