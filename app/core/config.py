@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -68,6 +69,18 @@ class Settings(BaseSettings):
     # symbol NSE was already asked about within the last cache window.
     LIVE_QUOTE_INTERVAL_SECONDS: int = 15
     LIVE_MARKET_INTERVAL_SECONDS: int = 60
+
+    @model_validator(mode="after")
+    def _normalize_database_url(self) -> "Settings":
+        # Managed hosts (Render/Railway/Heroku) inject `postgres://` or
+        # `postgresql://` URLs; the async stack needs the `+asyncpg` driver.
+        # Idempotent - a no-op when the scheme is already correct.
+        url = self.DATABASE_URL
+        if url.startswith("postgres://"):
+            self.DATABASE_URL = "postgresql+asyncpg://" + url[len("postgres://") :]
+        elif url.startswith("postgresql://") and "+asyncpg" not in url:
+            self.DATABASE_URL = "postgresql+asyncpg://" + url[len("postgresql://") :]
+        return self
 
     @property
     def cors_origins_list(self) -> list[str]:
