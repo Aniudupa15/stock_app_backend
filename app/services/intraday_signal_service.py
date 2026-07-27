@@ -24,6 +24,20 @@ _BEARISH_PATTERNS = {"Bearish Engulfing", "Shooting Star"}
 _BUY_THRESHOLD_PCT = 30.0
 _SELL_THRESHOLD_PCT = -30.0
 
+# Target/stop geometry is calibrated for a SINGLE intraday session. The bars we
+# score are daily, so ATR(14) here is the average *daily* range. A target set at
+# 2x that (the old value) needed a multi-day move and effectively never filled
+# intraday, while a 1x-ATR stop sat inside one day of normal noise - the setup
+# was structurally biased toward hitting the stop. These fractions keep both the
+# target and the stop reachable within one day while preserving a ~1.9:1
+# reward:risk.
+_TARGET_ATR_MULT = 0.75
+_STOP_ATR_MULT = 0.4
+# A support/resistance level is only preferred over the ATR fallback when it sits
+# at least this fraction of the ATR distance away from entry - otherwise a level
+# barely off entry would produce a tiny, meaningless target or an over-tight stop.
+_LEVEL_MIN_FRACTION = 0.4
+
 
 def _score_rsi(value: float | None) -> tuple[int, str | None]:
     if value is None:
@@ -200,31 +214,35 @@ class IntradaySignalService:
                 (lvl.price for lvl in levels if lvl.kind == "support" and lvl.price < last_close), reverse=True
             )
 
-            # ATR-based fallback targets a 2:1 reward:risk by design. A support/
-            # resistance level is only preferred over that fallback if it falls
-            # within a sane distance band - a level barely off entry would
-            # otherwise produce a tiny, meaningless reward (or risk).
-            atr_target_buy = last_close + 2 * atr_val
-            atr_stop_buy = last_close - atr_val
-            atr_target_sell = last_close - 2 * atr_val
-            atr_stop_sell = last_close + atr_val
+            # Intraday-reachable ATR distances (see _TARGET_ATR_MULT / _STOP_ATR_MULT).
+            # A nearby support/resistance level is preferred over the ATR fallback
+            # only when it sits at least _LEVEL_MIN_FRACTION of the ATR distance
+            # away, so the resulting reward/risk stays meaningful.
+            target_dist = _TARGET_ATR_MULT * atr_val
+            stop_dist = _STOP_ATR_MULT * atr_val
 
             if signal == "BUY":
+                atr_target = last_close + target_dist
+                atr_stop = last_close - stop_dist
                 candidate_resistance = next(
-                    (r for r in resistances if last_close + 0.5 * atr_val <= r <= atr_target_buy), None
+                    (r for r in resistances if last_close + _LEVEL_MIN_FRACTION * target_dist <= r <= atr_target), None
                 )
-                target_price = candidate_resistance if candidate_resistance else atr_target_buy
-                candidate_support = next((s for s in supports if atr_stop_buy <= s <= last_close - 0.3 * atr_val), None)
-                stop_loss = candidate_support if candidate_support else atr_stop_buy
-            else:  # SELL
+                target_price = candidate_resistance if candidate_resistance else atr_target
                 candidate_support = next(
-                    (s for s in supports if atr_target_sell <= s <= last_close - 0.5 * atr_val), None
+                    (s for s in supports if atr_stop <= s <= last_close - _LEVEL_MIN_FRACTION * stop_dist), None
                 )
-                target_price = candidate_support if candidate_support else atr_target_sell
+                stop_loss = candidate_support if candidate_support else atr_stop
+            else:  # SELL
+                atr_target = last_close - target_dist
+                atr_stop = last_close + stop_dist
+                candidate_support = next(
+                    (s for s in supports if atr_target <= s <= last_close - _LEVEL_MIN_FRACTION * target_dist), None
+                )
+                target_price = candidate_support if candidate_support else atr_target
                 candidate_resistance = next(
-                    (r for r in resistances if last_close + 0.3 * atr_val <= r <= atr_stop_sell), None
+                    (r for r in resistances if last_close + _LEVEL_MIN_FRACTION * stop_dist <= r <= atr_stop), None
                 )
-                stop_loss = candidate_resistance if candidate_resistance else atr_stop_sell
+                stop_loss = candidate_resistance if candidate_resistance else atr_stop
 
             risk = abs(entry_price - stop_loss)
             reward = abs(target_price - entry_price)
