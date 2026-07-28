@@ -119,6 +119,7 @@ def create_app() -> FastAPI:
     from services.trading_service.api import autopilot as _trading_autopilot
     from services.trading_service.api import backtest as _trading_backtest
     from services.trading_service.api import broker as _trading_broker
+    from services.trading_service.api import momentum as _trading_momentum
     from services.trading_service.api import paper as _trading_paper
     from services.trading_service.api import strategies as _trading_strategies
 
@@ -128,6 +129,7 @@ def create_app() -> FastAPI:
     app.include_router(_trading_paper.router)
     app.include_router(_trading_broker.router)
     app.include_router(_trading_autopilot.router)
+    app.include_router(_trading_momentum.router)
 
     # Request count/latency/in-flight gauges at GET /metrics, standard
     # Prometheus exposition format - unauthenticated by convention (scraped

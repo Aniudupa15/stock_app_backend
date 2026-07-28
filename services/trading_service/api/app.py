@@ -17,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import get_settings
 from app.core.exceptions import ProviderUnavailableError
 from app.infrastructure.db.session import dispose_engine
-from services.trading_service.api import accounts, autopilot, backtest, broker, paper, strategies
+from services.trading_service.api import accounts, autopilot, backtest, broker, momentum, paper, strategies
 
 
 @asynccontextmanager
@@ -54,5 +54,6 @@ def create_trading_app() -> FastAPI:
     app.include_router(paper.router)
     app.include_router(broker.router)
     app.include_router(autopilot.router)
+    app.include_router(momentum.router)
 
     return app
