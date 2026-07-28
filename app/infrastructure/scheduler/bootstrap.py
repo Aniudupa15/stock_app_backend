@@ -12,6 +12,7 @@ from app.infrastructure.scheduler.jobs import (
     run_financial_results_sync,
     run_indicator_snapshot_sync,
     run_ipo_sync,
+    run_momentum_report,
     run_news_sync,
     run_signal_snapshot_sync,
     run_universe_sync,
@@ -93,6 +94,13 @@ def start_scheduler(settings: Settings) -> AsyncIOScheduler:
         ),
         args=[settings],
         id="signal_snapshot_sync",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        run_momentum_report,
+        trigger=CronTrigger(hour=settings.MOMENTUM_REPORT_HOUR_IST, minute=settings.MOMENTUM_REPORT_MINUTE_IST),
+        args=[settings],
+        id="momentum_report",
         replace_existing=True,
     )
     scheduler.start()

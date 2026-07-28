@@ -339,6 +339,24 @@ async def test_momentum_rebalance_and_portfolio(trading_client, db_session):
     assert len(rb2.json()["sold"]) == 2
 
 
+async def test_momentum_daily_report_notifies_user(db_session):
+    from app.repositories.notification_repository import SqlAlchemyNotificationRepository
+    from services.trading_service.momentum.report import generate_daily_reports
+    from services.trading_service.persistence.repositories import PositionRepository, TradingAccountRepository
+
+    await _seed_series(db_session, "MOMCO", [100.0] * 10 + [100 + 50 * i / 29 for i in range(30)])  # latest ~150
+    account = await TradingAccountRepository(db_session).create(DEFAULT_USER_ID, "PAPER", Decimal("1000000"))
+    await PositionRepository(db_session).upsert(account.id, "MOMCO", "CNC", 100, Decimal("140"), Decimal("0"))
+
+    sent = await generate_daily_reports(db_session)
+    assert sent >= 1  # at least our account (trading tables aren't truncated between tests)
+
+    notifs = await SqlAlchemyNotificationRepository(db_session).list_for_user(
+        DEFAULT_USER_ID, unread_only=False, limit=20, offset=0
+    )
+    assert any("Momentum portfolio" in n.title for n in notifs)
+
+
 async def test_scanner_returns_buy_candidates(trading_client, db_session):
     await _seed_history(db_session, "SCANCO", n=40)  # creates the stock
     await _seed_signal(db_session, "SCANCO")
