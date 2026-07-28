@@ -283,3 +283,18 @@ async def run_ipo_sync(settings: Settings) -> None:
                 logger.exception("Scheduled IPO sync failed")
     finally:
         await client.aclose()
+
+
+async def run_momentum_report(settings: Settings) -> None:
+    """Post-market: mark each momentum paper portfolio to market and post an
+    in-app notification with its status. Pure DB work (no NSE fetch), so no
+    NseClient needed."""
+    from services.trading_service.momentum.report import generate_daily_reports
+
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        try:
+            sent = await generate_daily_reports(session)
+            logger.info("Scheduled momentum report succeeded: sent=%d", sent)
+        except Exception:
+            logger.exception("Scheduled momentum report failed")

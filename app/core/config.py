@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     IPO_SYNC_MINUTE_IST: int = 45
     SIGNAL_SNAPSHOT_SYNC_HOUR_IST: int = 18
     SIGNAL_SNAPSHOT_SYNC_MINUTE_IST: int = 45
+    # Momentum-portfolio daily report -> in-app notification. Runs post-market
+    # (~18:30 IST) once the day's Bhavcopy has landed, so the marks are today's.
+    MOMENTUM_REPORT_HOUR_IST: int = 18
+    MOMENTUM_REPORT_MINUTE_IST: int = 30
 
     # Live WebSocket push (app/api/v1/live.py) - quote interval matches
     # CACHE_QUOTE_TTL_SECONDS above so a broadcast tick never re-fetches a
