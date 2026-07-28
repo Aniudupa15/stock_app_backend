@@ -274,6 +274,71 @@ async def _seed_signal(db_session, symbol, confidence=75, signal="BUY"):
     await db_session.commit()
 
 
+async def _seed_series(db_session, symbol, closes):
+    await SqlAlchemyStockRepository(db_session).upsert_universe(
+        [
+            StockMasterRecord(
+                symbol=symbol, isin=None, name=f"{symbol} Ltd", series="EQ", listing_date=None, face_value=None
+            )
+        ]
+    )
+    await db_session.commit()
+    days = _weekdays(date(2026, 1, 5), len(closes))
+    recs = [
+        BhavcopyRecord(
+            symbol=symbol,
+            trade_date=d,
+            open=Decimal(str(c)),
+            high=Decimal(str(c)),
+            low=Decimal(str(c)),
+            close=Decimal(str(c)),
+            volume=100000,
+        )
+        for d, c in zip(days, closes, strict=False)
+    ]
+    await SqlAlchemyHistoricalPriceRepository(db_session).bulk_upsert_bars(recs)
+    await db_session.commit()
+
+
+async def test_momentum_ranking_orders_by_return(trading_client, db_session):
+    flat = [100.0] * 10
+    await _seed_series(db_session, "HIGHMOM", flat + [100 + 50 * i / 29 for i in range(30)])  # +50%
+    await _seed_series(db_session, "MIDMOM", [100.0] * 40)  # 0%
+    await _seed_series(db_session, "LOWMOM", flat + [100 - 30 * i / 29 for i in range(30)])  # -30%
+
+    resp = await trading_client.get("/trading/momentum/ranking?lookback=30&top=3")
+    assert resp.status_code == 200, resp.text
+    picks = resp.json()["picks"]
+    assert picks[0]["symbol"] == "HIGHMOM"
+    assert picks[-1]["symbol"] == "LOWMOM"
+    assert picks[0]["trailing_return_pct"] > picks[1]["trailing_return_pct"]
+
+
+async def test_momentum_rebalance_and_portfolio(trading_client, db_session):
+    flat = [100.0] * 10
+    await _seed_series(db_session, "HIGHMOM", flat + [100 + 50 * i / 29 for i in range(30)])
+    await _seed_series(db_session, "MIDMOM", flat + [100 + 20 * i / 29 for i in range(30)])
+    await _seed_series(db_session, "LOWMOM", flat + [100 - 30 * i / 29 for i in range(30)])
+    account_id = (await trading_client.post("/trading/accounts", json={"starting_balance": "1000000"})).json()["id"]
+
+    rb = await trading_client.post(f"/trading/accounts/{account_id}/momentum/rebalance?top=2")
+    assert rb.status_code == 200, rb.text
+    body = rb.json()
+    assert len(body["bought"]) == 2
+    bought_syms = {b["symbol"] for b in body["bought"]}
+    assert "HIGHMOM" in bought_syms and "MIDMOM" in bought_syms  # top 2, not LOWMOM
+    assert 900000 < float(body["portfolio_value"]) <= 1000000  # ~fully invested
+
+    pf = await trading_client.get(f"/trading/accounts/{account_id}/momentum/portfolio")
+    assert pf.status_code == 200
+    assert len(pf.json()["holdings"]) == 2
+
+    # A second rebalance sells + rebuys without error.
+    rb2 = await trading_client.post(f"/trading/accounts/{account_id}/momentum/rebalance?top=2")
+    assert rb2.status_code == 200
+    assert len(rb2.json()["sold"]) == 2
+
+
 async def test_scanner_returns_buy_candidates(trading_client, db_session):
     await _seed_history(db_session, "SCANCO", n=40)  # creates the stock
     await _seed_signal(db_session, "SCANCO")
