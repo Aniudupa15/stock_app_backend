@@ -43,7 +43,7 @@ async def _latest_closes(session: AsyncSession) -> dict[str, Decimal]:
     return {symbol: Decimal(str(close)) for symbol, close in rows}
 
 
-async def rebalance(session: AsyncSession, account: TradingAccountModel, *, lookback: int = 30, top: int = 30) -> dict:
+async def rebalance(session: AsyncSession, account: TradingAccountModel, *, lookback: int = 30, top: int = 10) -> dict:
     picks = await compute_ranking(session, lookback=lookback, top=top)
     if not picks:
         raise NoDataError("no momentum ranking available (insufficient price data)")
