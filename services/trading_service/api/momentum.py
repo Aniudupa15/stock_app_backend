@@ -25,7 +25,7 @@ router = APIRouter(prefix="/trading", tags=["momentum"])
 @router.get("/momentum/ranking")
 async def ranking(
     lookback: int = 30,
-    top: int = 30,
+    top: int = 10,
     _user_id: uuid.UUID = Depends(get_current_user_id),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
@@ -36,7 +36,7 @@ async def ranking(
 @router.post("/accounts/{account_id}/momentum/rebalance")
 async def do_rebalance(
     lookback: int = 30,
-    top: int = 30,
+    top: int = 10,
     account: TradingAccountModel = Depends(get_owned_account),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
