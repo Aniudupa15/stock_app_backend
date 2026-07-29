@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class AccountCreate(BaseModel):
     mode: str = Field(default="PAPER", pattern="^(PAPER|LIVE)$")
-    starting_balance: Decimal = Field(default=Decimal("100000"), gt=0)
+    starting_balance: Decimal = Field(default=Decimal("10000"), gt=0)
 
 
 class AccountOut(BaseModel):
