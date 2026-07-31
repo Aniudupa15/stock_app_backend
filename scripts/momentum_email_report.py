@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # no
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-from services.trading_service.momentum.ranking import compute_ranking  # noqa: E402
+from services.trading_service.momentum.ranking import compute_ranking, confidence_for_rank  # noqa: E402
 from services.trading_service.momentum.rebalance import _latest_closes  # noqa: E402
 from services.trading_service.persistence.repositories import (  # noqa: E402
     PositionRepository,
@@ -85,9 +85,12 @@ async def build_report() -> str:
                 lines.append("")
 
             picks = await compute_ranking(s, top=10)
-            lines.append("This month's top momentum picks (30-day return):")
+            lines.append("This month's top momentum picks (BUY, hold ~1 month, rebalance monthly):")
             for i, pk in enumerate(picks, 1):
-                lines.append(f"  {i:>2}. {pk.symbol:14} +{pk.trailing_return_pct:>5.1f}%   Rs{pk.last_close:,.0f}")
+                lines.append(
+                    f"  {i:>2}. {pk.symbol:14} BUY  +{pk.trailing_return_pct:>5.1f}% (30d)  "
+                    f"Rs{pk.last_close:,.0f}  conf {confidence_for_rank(i)}%"
+                )
     finally:
         await engine.dispose()
     lines += ["", "Paper trading. Validated momentum factor, but bumpy month-to-month. Not investment advice."]

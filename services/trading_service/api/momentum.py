@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from services.trading_service.api.deps import get_current_user_id, get_db_session, get_owned_account
-from services.trading_service.momentum.ranking import compute_ranking
+from services.trading_service.momentum.ranking import compute_ranking, enrich_pick
 from services.trading_service.momentum.rebalance import NoDataError, _latest_closes, rebalance
 from services.trading_service.persistence.models import TradingAccountModel
 from services.trading_service.persistence.repositories import PositionRepository
@@ -30,7 +30,8 @@ async def ranking(
     session: AsyncSession = Depends(get_db_session),
 ) -> dict:
     picks = await compute_ranking(session, lookback=lookback, top=top)
-    return {"lookback": lookback, "count": len(picks), "picks": [p.as_dict() for p in picks]}
+    enriched = [enrich_pick(p, i) for i, p in enumerate(picks, 1)]
+    return {"lookback": lookback, "count": len(enriched), "picks": enriched}
 
 
 @router.post("/accounts/{account_id}/momentum/rebalance")
