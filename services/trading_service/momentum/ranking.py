@@ -32,6 +32,36 @@ class MomentumPick:
         }
 
 
+def signal_for_pick() -> str:
+    """Long-only momentum: every top-N pick is a BUY. A SELL is implicit - a held
+    name that drops out of the top ranks at the next monthly rebalance."""
+    return "BUY"
+
+
+def hold_period() -> str:
+    """Validated horizon: 30-day lookback, rebalanced monthly. Holding much longer
+    (120d+) reverses the effect, so ~1 month is the honest answer."""
+    return "~1 month"
+
+
+def confidence_for_rank(rank: int) -> int:
+    """Rank-based tilt (1 = strongest), NOT a probability. Capped well below
+    certainty because the strategy's historical monthly hit-rate is ~53%."""
+    return max(50, min(68, 68 - (rank - 1) * 2))
+
+
+def enrich_pick(pick: MomentumPick, rank: int) -> dict:
+    """The ranking `as_dict` plus the recommendation fields the apps render:
+    rank, BUY/SELL signal, hold horizon, and a rank-based confidence."""
+    return {
+        **pick.as_dict(),
+        "rank": rank,
+        "signal": signal_for_pick(),
+        "hold_period": hold_period(),
+        "confidence": confidence_for_rank(rank),
+    }
+
+
 async def compute_ranking(
     session: AsyncSession,
     *,
