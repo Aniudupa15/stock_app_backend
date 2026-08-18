@@ -25,3 +25,6 @@ htmlcov/
 
 # Old JSON persistence (retired in favor of Postgres)
 data/*.json
+#environments
+.env
+.env.example
