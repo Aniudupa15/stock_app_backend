@@ -43,6 +43,70 @@ async def _latest_closes(session: AsyncSession) -> dict[str, Decimal]:
     return {symbol: Decimal(str(close)) for symbol, close in rows}
 
 
+_DEFAULT_STOP_LOSS_PCT = Decimal("15")
+
+
+async def check_stop_losses(
+    session: AsyncSession, account: TradingAccountModel, *, stop_loss_pct: Decimal = _DEFAULT_STOP_LOSS_PCT
+) -> dict:
+    """Sell any open momentum position that has fallen >= stop_loss_pct from
+    entry, independent of the monthly rebalance cycle.
+
+    The rebalance() loop only ever exits a position on ExitReason.SIGNAL (it
+    dropped out of the top-N at the next rebalance) - nothing checks a
+    position in between. A single pick can crash hard mid-month (backtesting
+    the 30-day config found one that lost 63% before its next scheduled
+    rebalance) and ride the full drawdown unprotected. Call this daily,
+    alongside the price sync, so a stop actually fires before the next
+    rebalance instead of after the damage is already done.
+    """
+    closes = await _latest_closes(session)
+    pos_repo = PositionRepository(session)
+    trade_repo = TradeRepository(session)
+    cash = Decimal(account.virtual_balance) if account.virtual_balance is not None else _DEFAULT_CASH
+
+    holdings = [p for p in await pos_repo.list_for_account(account.id) if p.net_qty > 0]
+    stopped_out = []
+    for h in holdings:
+        price = closes.get(h.symbol)
+        if price is None or h.avg_price <= 0:
+            continue
+        loss_pct = (h.avg_price - price) / h.avg_price * 100
+        if loss_pct < stop_loss_pct:
+            continue
+        qty = h.net_qty
+        sell_ch = compute(Side.SELL, Product.CNC, qty, price)
+        buy_ch = compute(Side.BUY, Product.CNC, qty, h.avg_price)
+        pnl_gross = (price - h.avg_price) * qty
+        charges = sell_ch.total + buy_ch.total
+        cash += qty * price - sell_ch.total
+        await trade_repo.add(
+            Trade(
+                account_id=account.id,
+                symbol=h.symbol,
+                qty=qty,
+                entry_price=h.avg_price,
+                exit_price=price,
+                pnl_gross=pnl_gross,
+                charges_total=charges,
+                pnl_net=pnl_gross - charges,
+                exit_reason=ExitReason.STOP_LOSS,
+            )
+        )
+        await pos_repo.upsert(account.id, h.symbol, "CNC", 0, Decimal("0"), h.realized_pnl + pnl_gross)
+        stopped_out.append({"symbol": h.symbol, "loss_pct": float(loss_pct), "exit_price": float(price)})
+
+    if stopped_out:
+        await TradingAccountRepository(session).update_balance(account.id, cash)
+        await AuditLogRepository(session).append(
+            actor="momentum",
+            event_type="STOP_LOSS",
+            account_id=account.id,
+            payload={"stopped_out": stopped_out},
+        )
+    return {"stopped_out": stopped_out, "cash": str(cash.quantize(Decimal("0.01")))}
+
+
 async def rebalance(session: AsyncSession, account: TradingAccountModel, *, lookback: int = 30, top: int = 10) -> dict:
     picks = await compute_ranking(session, lookback=lookback, top=top)
     if not picks:
