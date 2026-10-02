@@ -62,8 +62,14 @@ async def build_report() -> tuple[bool, str]:
     try:
         async with sf() as s:
             dates = (
-                await s.execute(text("select distinct trade_date from historical_prices order by trade_date desc limit 2"))
-            ).scalars().all()
+                (
+                    await s.execute(
+                        text("select distinct trade_date from historical_prices order by trade_date desc limit 2")
+                    )
+                )
+                .scalars()
+                .all()
+            )
             if len(dates) < 2:
                 lines.append("Not enough price history yet to compute movers.")
                 return False, "\n".join(lines)
@@ -102,20 +108,22 @@ async def build_report() -> tuple[bool, str]:
 
             gainers = sorted(liquid, key=lambda m: m[4], reverse=True)[:5]
             lines.append("TOP 5 GAINERS")
-            for symbol, name, close, volume, pct in gainers:
+            for symbol, _name, close, volume, pct in gainers:
                 lines.append(f"  {symbol:14} +{pct:>5.1f}%  Rs{close:>9,.2f}   vol {volume:>10,}")
             lines.append("")
 
             losers = sorted(liquid, key=lambda m: m[4])[:5]
             lines.append("TOP 5 LOSERS")
-            for symbol, name, close, volume, pct in losers:
+            for symbol, _name, close, volume, pct in losers:
                 lines.append(f"  {symbol:14} {pct:>6.1f}%  Rs{close:>9,.2f}   vol {volume:>10,}")
             lines.append("")
 
             by_volume = sorted(movers, key=lambda m: m[3], reverse=True)[:5]
             lines.append("TOP 5 BY VOLUME")
-            for symbol, name, close, volume, pct in by_volume:
-                lines.append(f"  {symbol:14} vol {volume:>10,}   Rs{close:>9,.2f}   ({'+' if pct >= 0 else ''}{pct:.1f}%)")
+            for symbol, _name, close, volume, pct in by_volume:
+                lines.append(
+                    f"  {symbol:14} vol {volume:>10,}   Rs{close:>9,.2f}   ({'+' if pct >= 0 else ''}{pct:.1f}%)"
+                )
     finally:
         await engine.dispose()
     lines += [

@@ -45,7 +45,9 @@ def send_whatsapp(message: str, to: str | None = None, retries: int = 3) -> bool
     payload = json.dumps({"to": to, "message": message}).encode()
     for attempt in range(1, retries + 1):
         req = urllib.request.Request(
-            url, data=payload, method="POST",
+            url,
+            data=payload,
+            method="POST",
             headers={"content-type": "application/json", "x-api-key": secret},
         )
         try:
