@@ -25,7 +25,7 @@ email-validator==2.2.0
 # Trading: broker-credential encryption at rest (Fernet)
 cryptography==44.0.0
 # Zerodha Kite Connect client (live trading only; lazily imported)
-# kiteconnect==5.0.1  # uncomment + install when enabling live broker connectivity
+kiteconnect==5.2.2  # live Zerodha execution (scripts/zerodha_rebalance.py)
 
 # Caching
 redis==5.2.1
@@ -37,6 +37,12 @@ prometheus-fastapi-instrumentator==7.0.0
 python-dotenv==1.0.1
 pytz==2024.2
 numpy==2.2.1
+
+# Momentum signal research (feature engineering + walk-forward model evaluation)
+pandas==3.0.5
+scikit-learn==1.9.1
+scipy==1.18.1
+joblib==1.6.0
 
 # Testing / lint / load testing
 pytest==8.3.4

@@ -1,0 +1,16 @@
+{
+  "name": "whatsapp-notify-lambda",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Personal WhatsApp alerts: AWS Lambda wrapper around the mudslide CLI, session kept in S3",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "mudslide": "0.38.1"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-s3": "^3.1145.0"
+  }
+}
