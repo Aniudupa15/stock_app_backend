@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -47,7 +48,9 @@ async def test_backfill_date_returns_zero_for_holiday_with_no_bars(sample_stock)
 async def test_get_history_returns_bars_in_range(bhavcopy_record, sample_stock):
     repo = FakeHistoricalPriceRepository()
     service = PriceHistoryService(repo, FakeStockDataProvider(), FakeStockRepository([sample_stock]))
-    await repo.bulk_upsert_bars([bhavcopy_record])
+    # "1M" is relative to today, so the bar must be too - a fixed date silently aged out of range.
+    recent = replace(bhavcopy_record, trade_date=date.today() - timedelta(days=3))
+    await repo.bulk_upsert_bars([recent])
 
     result = await service.get_history("RELIANCE", "1M")
 
