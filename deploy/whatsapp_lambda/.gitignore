@@ -1,0 +1,6 @@
+node_modules/
+build/
+function.zip
+# WhatsApp session keys and the API secret - never commit
+.session/
+.deploy.env
