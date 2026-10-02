@@ -37,7 +37,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # no
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from scripts.whatsapp_notify import notify as notify_whatsapp  # noqa: E402
-
 from services.trading_service.momentum.ml_ranking import (  # noqa: E402
     ModelNotTrainedError,
     compute_ml_ranking,
@@ -111,7 +110,7 @@ async def build_report() -> tuple[bool, str]:
             lines.append("")
             cols = ("Rank", "Symbol", "Last Close", "20d Return", "Model Conf.", "Held")
             widths = (4, 14, 12, 12, 12, 4)
-            header = "  ".join(c.ljust(w) for c, w in zip(cols, widths))
+            header = "  ".join(c.ljust(w) for c, w in zip(cols, widths, strict=False))
             lines.append(header)
             lines.append("  ".join("-" * w for w in widths))
             for i, pk in enumerate(picks, 1):

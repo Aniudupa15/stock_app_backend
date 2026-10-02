@@ -44,7 +44,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # no
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from scripts.whatsapp_notify import notify as notify_whatsapp  # noqa: E402
-
 from services.trading_service.momentum.ranking import compute_ranking, confidence_for_rank  # noqa: E402
 
 LOOKBACK_DAYS = 1
@@ -111,7 +110,7 @@ async def build_report() -> tuple[bool, str]:
             lines.append("")
             cols = ("Rank", "Symbol", "Buy Price", "Illustrative Target", "Confidence", "Held")
             widths = (4, 14, 12, 24, 10, 4)
-            header = "  ".join(c.ljust(w) for c, w in zip(cols, widths))
+            header = "  ".join(c.ljust(w) for c, w in zip(cols, widths, strict=False))
             lines.append(header)
             lines.append("  ".join("-" * w for w in widths))
             for i, pk in enumerate(picks, 1):

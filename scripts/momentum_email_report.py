@@ -35,7 +35,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # no
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from scripts.whatsapp_notify import notify as notify_whatsapp  # noqa: E402
-
 from services.trading_service.momentum.ranking import compute_ranking, confidence_for_rank  # noqa: E402
 
 
