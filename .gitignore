@@ -33,3 +33,7 @@ data/ml_models/
 .env.example
 # Live Zerodha bot ledger (local state, per machine)
 scripts/state/
+
+# Never commit any env/secret variant (backups included); the template is the only exception
+.env.*
+!.env.example
