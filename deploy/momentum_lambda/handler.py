@@ -2,7 +2,7 @@
 
 Scheduled (EventBridge Scheduler, Asia/Kolkata):
   {"job": "morning"}  09:20 Mon-Fri  price catch-up; on rebalance day -> "tap to rebalance" message
-  {"job": "evening"}  18:45 Mon-Fri  price sync, daily status report, stop-loss alerts
+  {"job": "evening"}  19:15 Mon-Fri  price sync, monthly-momentum picks report, stop-loss alerts
 
 HTTP (Lambda Function URL = the Kite app's redirect URL):
   /kite/callback  Kite login redirect  -> plan page with a one-tap Kite *basket* (orders are placed
@@ -238,65 +238,62 @@ def job_morning() -> dict:
 
 
 def job_evening() -> dict:
+    """Weekday 19:15: price sync -> monthly-momentum picks report; stop-loss alert only when a stop breaks."""
     t = now()
     st, s = load_state(), settings()
     con = db.connect()
     try:
         sync_log = db.catch_up(con, t.date())
+        as_of = db.latest_trade_date(con)
+        rows = db.ranking_rows(con, take=s["top"] + 10)
+        series = db.close_series(con, [r[0] for r in rows])
         ledger = st["ledger"]
         closes = closes_on_latest(con, list(ledger))
-        as_of = db.latest_trade_date(con)
     finally:
         con.close()
-    if not ledger:
-        return {"sync": sync_log, "status": "no holdings"}
-    cost = value = Decimal(0)
-    rows, hits, near = [], [], []
-    for sym, pos in ledger.items():
-        qty, avg = int(pos["qty"]), Decimal(str(pos["avg_price"]))
-        close = closes.get(sym, avg)
-        cost += qty * avg
-        value += qty * close
-        stop = avg * (1 - s["stop"] / 100)
-        away = (close / stop - 1) * 100
-        if close <= stop:
-            hits.append(sym)
-        elif away < 5:
-            near.append(f"{sym} only {away:.1f}% above its stop")
-        rows.append(
-            (
-                (close / avg - 1) * 100,
-                f"{sym:11} x{qty:<3} Rs{close:>9,.2f} {(close / avg - 1) * 100:+6.1f}%  stop {away:3.0f}% away",
-            )
-        )
-    rows.sort(reverse=True)
-    pnl_pct = (value / cost - 1) * 100 if cost else Decimal(0)
-    body = [
-        f"Prices as of {as_of} close",
-        f"Invested Rs{cost:,.0f} -> Rs{value:,.0f} ({value - cost:+,.0f} / {pnl_pct:+.2f}%)",
-        "",
-    ]
-    body += [r[1] for r in rows]
-    if near:
-        body += ["", "Close to stop: " + "; ".join(near)]
-    if hits:
-        gtt = [x for x in hits if ledger[x].get("gtt_id")]
-        body += [
-            "",
-            "STOP HIT at close: " + ", ".join(hits),
-            ("Kite GTT should already have sold: " + ", ".join(gtt)) if gtt else "",
-            "To sell the rest, tap to log in (market hours):",
-            login_url(cfg("KITE_API_KEY"), intent="stop"),
-        ]
+    picks, excluded, _check = filter_picks([r[0] for r in rows], series, s["top"])
+    info = {r[0]: r for r in rows}
+    held = set(ledger)
+    lines = [f"30-day momentum top-{s['top']} (liquid NSE universe), prices as of {as_of} close:"]
+    if as_of != t.date():
+        lines.append(f"(today's NSE file isn't out yet - showing {as_of}; it will catch up tomorrow 09:20)")
+    lines.append("")
+    for i, sym in enumerate(picks, 1):
+        _sym, ret, close = info[sym]
+        lines.append(f"{i:>2}. {sym:12} {ret:+6.1f}%  Rs{close:,.2f}  {'HELD' if sym in held else 'new'}")
+    dropped = [x for x in held if x not in picks]
+    if dropped:
+        lines += ["", "Held but out of the top-10 now (sold at next rebalance if still out): " + ", ".join(dropped)]
+    lines += [f"  excluded {e}" for e in excluded]
     nxt = next_rebalance(st, s["gap"])
     if nxt:
-        body += ["", f"Last rebalance {st.get('last_live_date')}; next one {nxt:%a %d %b}."]
-    body += ["", "Not investment advice."]
-    notify(
-        f"Zerodha bot: Rs{value:,.0f} ({pnl_pct:+.2f}%)" + (" - STOP ALERT" if hits else ""),
-        "\n".join(x for x in body if x is not None),
-    )
-    return {"sync": sync_log, "value": str(value), "stops": hits}
+        lines += ["", f"Next rebalance {nxt:%a %d %b} - you'll get a tap-to-review link."]
+    lines += ["", "Not investment advice."]
+    notify(f"Monthly momentum picks - {as_of:%d %b}", "\n".join(lines))
+
+    hits = []
+    for sym, pos in ledger.items():
+        avg, close = Decimal(str(pos["avg_price"])), closes.get(sym)
+        if close is not None and close <= avg * (1 - s["stop"] / 100):
+            hits.append(
+                f"{sym}: closed Rs{close:,.2f}, bought Rs{avg:,.2f} ({(close / avg - 1) * 100:+.1f}%)"
+                + (" - Kite GTT should already have sold it" if pos.get("gtt_id") else "")
+            )
+    if hits:
+        notify(
+            "STOP-LOSS ALERT - momentum bot",
+            "\n".join(
+                [
+                    *hits,
+                    "",
+                    "To sell, tap and log in during market hours (09:15-15:25):",
+                    login_url(cfg("KITE_API_KEY"), intent="stop"),
+                    "",
+                    "Not investment advice.",
+                ]
+            ),
+        )
+    return {"sync": sync_log, "picks": picks, "stops": hits}
 
 
 # ------------------------------------------------------------------ HTTP: login -> plan page

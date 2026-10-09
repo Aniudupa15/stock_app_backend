@@ -50,6 +50,11 @@ def day_counts(con) -> tuple[int, int]:
 
 def ranking_candidates(con, lookback: int = 30, universe: int = 300, take: int = 20) -> list[str]:
     """compute_ranking(): liquid top-`universe` by turnover, ranked by `lookback`-day return."""
+    return [r[0] for r in ranking_rows(con, lookback, universe, take)]
+
+
+def ranking_rows(con, lookback: int = 30, universe: int = 300, take: int = 20) -> list[tuple[str, float, float]]:
+    """(symbol, trailing return %, last close) - same ranking as ranking_candidates()."""
     latest = latest_trade_date(con)
     if latest is None:
         return []
@@ -68,10 +73,10 @@ def ranking_candidates(con, lookback: int = 30, universe: int = 300, take: int =
     for sym, (cs, ts) in series.items():
         if len(cs) <= lookback or cs[-1 - lookback] <= 0:
             continue
-        ranked.append((sym, (cs[-1] / cs[-1 - lookback] - 1) * 100, sum(ts) / len(ts)))
+        ranked.append((sym, (cs[-1] / cs[-1 - lookback] - 1) * 100, sum(ts) / len(ts), cs[-1]))
     liquid = sorted(ranked, key=lambda r: r[2], reverse=True)[:universe]
     liquid.sort(key=lambda r: r[1], reverse=True)
-    return [r[0] for r in liquid[:take]]
+    return [(r[0], r[1], r[3]) for r in liquid[:take]]
 
 
 def close_series(con, symbols: list[str], days: int = 70) -> dict[str, list[float]]:
