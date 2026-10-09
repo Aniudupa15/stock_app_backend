@@ -111,7 +111,7 @@ fi
 aws iam put-role-policy --role-name "$SCHED_ROLE" --policy-name invoke-bot --policy-document \
   "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"lambda:InvokeFunction\",\"Resource\":\"$FN_ARN\"}]}"
 SCHED_ARN=$(aws iam get-role --role-name "$SCHED_ROLE" --query Role.Arn --output text)
-for spec in "momentum-morning|cron(20 9 ? * MON-FRI *)|morning" "momentum-evening|cron(45 18 ? * MON-FRI *)|evening"; do
+for spec in "momentum-morning|cron(20 9 ? * MON-FRI *)|morning" "momentum-evening|cron(15 19 ? * MON-FRI *)|evening"; do
   IFS='|' read -r NAME EXPR JOB <<<"$spec"
   ARGS=(--name "$NAME" --schedule-expression "$EXPR" --schedule-expression-timezone Asia/Kolkata
         --flexible-time-window Mode=OFF
