@@ -555,7 +555,9 @@ def portfolio_page(kite: Kite, st: dict, account: Check) -> dict:
                 "qty": int(pos["qty"]),
                 "avg_price": pos["avg_price"],
                 "exit_trigger": trig[0],
-                "how": f"GTT {gtt.get('status', 'unknown')}" if gtt else "sold outside the bot",
+                "how": (f"GTT {gtt.get('status', 'unknown')}" if gtt else "GTT (status not returned by Zerodha)")
+                if pos.get("gtt_id")
+                else "sold outside the bot",
                 "recorded": t.date().isoformat(),
             }
         )
