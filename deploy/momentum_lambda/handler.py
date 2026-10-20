@@ -274,7 +274,8 @@ def job_evening() -> dict:
     hits = []
     for sym, pos in ledger.items():
         avg, close = Decimal(str(pos["avg_price"])), closes.get(sym)
-        if close is not None and close <= avg * (1 - s["stop"] / 100):
+        if close is not None and close <= avg * (1 - s["stop"] / 100) and not pos.get("stop_alerted"):
+            pos["stop_alerted"] = t.date().isoformat()
             hits.append(
                 f"{sym}: closed Rs{close:,.2f}, bought Rs{avg:,.2f} ({(close / avg - 1) * 100:+.1f}%)"
                 + (" - Kite GTT should already have sold it" if pos.get("gtt_id") else "")
@@ -293,6 +294,8 @@ def job_evening() -> dict:
                 ]
             ),
         )
+    if hits:
+        save("state.json", st)
     return {"sync": sync_log, "picks": picks, "stops": hits}
 
 
@@ -532,6 +535,74 @@ def sync_page(st: dict) -> dict:
     )
 
 
+def portfolio_page(kite: Kite, st: dict, account: Check) -> dict:
+    """Read-only: record positions Zerodha sold (GTT stops), report every bot stock at live prices."""
+    t, stop_pct = now(), settings()["stop"]
+    before = {k: dict(v) for k, v in st["ledger"].items()}
+    _owned, gone = reconcile(kite, st)
+    closed = st.setdefault("closed", [])
+    for sym in gone:
+        pos, gtt = before[sym], {}
+        if pos.get("gtt_id"):
+            try:
+                gtt = kite.get_gtt(pos["gtt_id"])
+            except KiteError:
+                gtt = {}
+        trig = (gtt.get("condition") or {}).get("trigger_values") or [None]
+        closed.append(
+            {
+                "symbol": sym,
+                "qty": int(pos["qty"]),
+                "avg_price": pos["avg_price"],
+                "exit_trigger": trig[0],
+                "how": f"GTT {gtt.get('status', 'unknown')}" if gtt else "sold outside the bot",
+                "recorded": t.date().isoformat(),
+            }
+        )
+    hold = {base(h["tradingsymbol"]): h for h in kite.holdings()}
+    lines, cost, value = [], Decimal(0), Decimal(0)
+    for sym, pos in st["ledger"].items():
+        q, avg = int(pos["qty"]), Decimal(str(pos["avg_price"]))
+        ltp = Decimal(str((hold.get(sym) or {}).get("last_price") or avg))
+        cost, value = cost + q * avg, value + q * ltp
+        gtt_status = "no GTT"
+        if pos.get("gtt_id"):
+            try:
+                gtt_status = "GTT " + kite.get_gtt(pos["gtt_id"]).get("status", "?")
+            except KiteError as exc:
+                gtt_status = f"GTT ? ({exc})"
+        stop = avg * (1 - stop_pct / 100)
+        lines.append(
+            f"{sym:11} x{q:<3} Rs{avg:,.2f} -> Rs{ltp:,.2f}  {q * (ltp - avg):+,.0f} ({(ltp / avg - 1) * 100:+.1f}%)  "
+            f"stop {(ltp / stop - 1) * 100:.0f}% away, {gtt_status}"
+        )
+    realized = []
+    for c in closed:
+        if c.get("exit_trigger"):
+            pnl = int(c["qty"]) * (Decimal(str(c["exit_trigger"])) - Decimal(str(c["avg_price"])))
+            realized.append(
+                f"{c['symbol']} x{c['qty']}: bought Rs{Decimal(str(c['avg_price'])):,.2f}, {c['how']} at trigger Rs{c['exit_trigger']} (~{pnl:+,.0f} at that price; a gap-down open fills lower - exact price in Kite > Orders)"
+            )
+        else:
+            realized.append(f"{c['symbol']} x{c['qty']}: bought Rs{Decimal(str(c['avg_price'])):,.2f}, {c['how']}")
+    st.setdefault("history", []).append({"at": t.isoformat(), "mode": "portfolio-check", "gone": gone})
+    save("state.json", st)
+    pct = (value / cost - 1) * 100 if cost else Decimal(0)
+    summary = [
+        f"Open bot positions: cost Rs{cost:,.0f} -> Rs{value:,.0f} ({value - cost:+,.0f} / {pct:+.2f}%)",
+        "",
+        *lines,
+    ]
+    if realized:
+        summary += ["", "Closed:", *realized]
+    if gone:
+        summary += ["", "Newly recorded as sold: " + ", ".join(gone)]
+    summary += ["", account.line(), "Read-only check - nothing was traded. Not investment advice."]
+    text = "\n".join(summary)
+    notify(f"Bot portfolio check ({t:%d %b %H:%M})", text)
+    return page("Bot portfolio", f"<pre class='note' style='white-space:pre-wrap'>{html.escape(text)}</pre>")
+
+
 def handle_http(event: dict) -> dict:
     path = event.get("rawPath", "/")
     q = event.get("queryStringParameters") or {}
@@ -560,6 +631,8 @@ def handle_http(event: dict) -> dict:
     consent = (prof.get("meta") or {}).get("demat_consent", "unknown")
     ddpi = Check("DDPI", consent == "consent", f"demat_consent={consent}")
     intent = q.get("intent", "rebalance")
+    if intent == "portfolio":
+        return portfolio_page(kite, st, account)
     return plan_page(kite, st, intent if intent in ("rebalance", "stop") else "rebalance", account, ddpi)
 
 

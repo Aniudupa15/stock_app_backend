@@ -104,6 +104,9 @@ class Kite:
     def delete_gtt(self, trigger_id: int) -> None:
         self._call("DELETE", f"/gtt/triggers/{trigger_id}")
 
+    def get_gtt(self, trigger_id: int) -> dict:
+        return self._call("GET", f"/gtt/triggers/{trigger_id}")
+
 
 def instruments_nse() -> dict[str, float]:
     """tradingsymbol -> tick size for every NSE equity instrument (public CSV, no auth)."""
