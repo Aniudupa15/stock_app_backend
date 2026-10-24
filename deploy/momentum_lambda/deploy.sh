@@ -45,18 +45,15 @@ if ! aws iam get-role --role-name "$ROLE" >/dev/null 2>&1; then
   echo "Waiting for the new IAM role to propagate..."; sleep 15
 fi
 aws iam put-role-policy --role-name "$ROLE" --policy-name state-objects --policy-document \
-  "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\",\"s3:PutObject\"],\"Resource\":[\"arn:aws:s3:::$BUCKET/state.json\",\"arn:aws:s3:::$BUCKET/session.json\",\"arn:aws:s3:::$BUCKET/basket.json\",\"arn:aws:s3:::$BUCKET/paper_orb.json\"]},{\"Effect\":\"Allow\",\"Action\":\"s3:ListBucket\",\"Resource\":\"arn:aws:s3:::$BUCKET\"}]}"
+  "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\",\"s3:PutObject\"],\"Resource\":[\"arn:aws:s3:::$BUCKET/state.json\",\"arn:aws:s3:::$BUCKET/session.json\",\"arn:aws:s3:::$BUCKET/basket.json\"]},{\"Effect\":\"Allow\",\"Action\":\"s3:ListBucket\",\"Resource\":\"arn:aws:s3:::$BUCKET\"}]}"
 ROLE_ARN=$(aws iam get-role --role-name "$ROLE" --query Role.Arn --output text)
 
 # --- Build: handler + the SAME tested planning/safety modules + pure-Python deps.
 rm -rf build function.zip && mkdir -p build/services/trading_service/momentum build/libs/trading_calendar
-cp handler.py kite.py db.py orb.py build/
+cp handler.py kite.py db.py build/
 for d in services services/trading_service services/trading_service/momentum libs libs/trading_calendar; do : > "build/$d/__init__.py"; done
 cp "$ROOT/services/trading_service/momentum/live_plan.py" "$ROOT/services/trading_service/momentum/live_safety.py" build/services/trading_service/momentum/
 cp "$ROOT/libs/trading_calendar/calendar.py" build/libs/trading_calendar/
-# The /nse-news skill's news.py (stdlib only) powers the news red-flag checks; vendored if installed.
-NEWS_PY="${NSE_NEWS_PY:-$HOME/.claude/skills/nse-news/news.py}"
-if [ -f "$NEWS_PY" ]; then cp "$NEWS_PY" build/news.py; else echo "Note: $NEWS_PY not found - news red flags disabled"; fi
 "$PY" -m pip install -q -r requirements.txt --target build --only-binary=:all: \
   --platform manylinux2014_x86_64 --python-version 3.12 --implementation cp
 if [ -x /c/Windows/System32/tar.exe ]; then

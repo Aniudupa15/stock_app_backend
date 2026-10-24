@@ -7,15 +7,11 @@ close - the bot's own ranking), using Yahoo's 5-minute history. Rs 10,000 per tr
 
 from __future__ import annotations
 
-import sys
 from collections import defaultdict
-from pathlib import Path
 
+import orb
 import pandas as pd
 from backtest import Backtester, Config, load_panel
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "deploy" / "momentum_lambda"))
-import orb  # noqa: E402
 
 
 def main() -> None:
