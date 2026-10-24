@@ -14,6 +14,7 @@ The planning/safety logic is the same tested code the PC bot used (live_plan.py,
 import html
 import json
 import os
+import re
 import smtplib
 import urllib.request
 from datetime import date, datetime, timedelta
@@ -23,6 +24,7 @@ from zoneinfo import ZoneInfo
 
 import boto3
 import db
+import orb
 from kite import BASKET, Kite, KiteError, instruments_nse, login_url
 
 from services.trading_service.momentum.live_plan import plan_buys, plan_sells, reconcile_ledger, stop_loss_prices
@@ -176,6 +178,54 @@ def next_rebalance(state: dict, gap: int) -> date | None:
     return d
 
 
+RED_TAGS = ("legal", "risk", "halt")  # from the /nse-news skill's KEYWORDS
+# Routine compliance filings mention "SEBI" but aren't red flags (the skill tags them "legal").
+ROUTINE = re.compile(
+    r"trading window|certificate under sebi|regulation 74|compliance certificate|newspaper|"
+    r"investor presentation|shareholding pattern|record date|book closure|analysts?.{0,20}meet|"
+    r"intimation of (board )?meeting|press release|loss of share certificate|duplicate share",
+    re.I,
+)
+
+
+def news_red_flags(watch: dict[str, str | None], hours: int = 72) -> tuple[list[dict], list[str]]:
+    """Red-flag headlines/announcements for `watch` {SYMBOL: company name} via the /nse-news skill's
+    news.py (Google News India + NSE announcements). Returns (items, errors); never raises."""
+    try:
+        import news
+    except ImportError:
+        return [], ["news module not deployed"]
+    errors: list[str] = []
+    try:
+        items = news.collect(news.Fetcher(pause=0.2), watch, {}, nse=True, hours=hours, errors=errors, max_headlines=5)
+        items = news.dedupe(news.tag(items, watch))
+    except Exception as exc:
+        return [], [f"news check failed: {exc}"]
+    flagged = []
+    for it in items:
+        if ROUTINE.search(it.get("title", "")):
+            continue
+        red = [t for t in it.get("tags", []) if t in RED_TAGS]
+        if red or re.search(r"\bpledge", it.get("title", ""), re.I):
+            flagged.append(
+                {
+                    "id": news.fingerprint(it),
+                    "symbols": it.get("touches") or [it.get("ticker")],
+                    "tags": red or ["pledge"],
+                    "title": it.get("title", "")[:160],
+                    "when": it["time"].strftime("%d %b") if it.get("time") else "",
+                }
+            )
+    nse_down = any("NSE announcements" in e for e in errors)
+    return flagged, (["NSE announcements unavailable from AWS - headlines only"] if nse_down else []) + [
+        e for e in errors if "NSE announcements" not in e
+    ][:3]
+
+
+def flag_lines(flagged: list[dict]) -> list[str]:
+    return [f"  ! {','.join(f['symbols'])} [{'/'.join(f['tags'])}] {f['title']} ({f['when']})" for f in flagged]
+
+
 def closes_on_latest(con, symbols: list[str]) -> dict[str, Decimal]:
     series = db.close_series(con, symbols, days=10)
     return {s: Decimal(str(v[-1])) for s, v in series.items() if v}
@@ -190,6 +240,11 @@ def job_morning() -> dict:
     con = db.connect()
     try:
         sync_log = db.catch_up(con, t.date() - timedelta(days=1))
+        if t.weekday() < 5 and t.date() not in holidays():
+            # Paper test of the /nse-* skills' intraday ORB on today's momentum leaders (as of last close).
+            paper = load("paper_orb.json", {"trades": [], "leaders": {}})
+            paper["leaders"] = {t.date().isoformat(): db.ranking_candidates(con, take=20)}
+            save("paper_orb.json", paper)
         due, why = rebalance_due(st, t, s["gap"])
         if not due:
             return {"sync": sync_log, "rebalance": why}
@@ -212,7 +267,19 @@ def job_morning() -> dict:
             "\n".join([*lines, "", "Nothing to approve. Re-checks next weekday."]),
         )
         return {"blocked": [c.detail for c in checks if not c.ok]}
-    st["pending"] = {"picks": picks, "data_date": str(data_date), "created": t.isoformat()}
+    con = db.connect()
+    try:
+        watch = db.names(con, sorted(set(picks) | set(st["ledger"])))
+    finally:
+        con.close()
+    flagged, news_err = news_red_flags(watch)
+    news_lines = [
+        "News red flags (last 3 days):",
+        *(flag_lines(flagged) or ["  none found"]),
+        *[f"  ({e})" for e in news_err],
+    ]
+    lines += ["", *news_lines]
+    st["pending"] = {"picks": picks, "data_date": str(data_date), "created": t.isoformat(), "news": news_lines}
     save("state.json", st)
     held = st["ledger"]
     notify(
@@ -235,6 +302,34 @@ def job_morning() -> dict:
         ),
     )
     return {"pending": picks}
+
+
+def paper_orb_lines(t: datetime) -> list[str]:
+    """Replay today's ORB (skills' rules) on this morning's leaders; keep a running paper ledger."""
+    paper = load("paper_orb.json", {"trades": [], "leaders": {}})
+    syms = paper.get("leaders", {}).get(t.date().isoformat())
+    if not syms:
+        return []
+    done_today = [x for x in paper["trades"] if x["day"] == t.date().isoformat()]
+    if not done_today:
+        for sym in syms:
+            bars = orb.fetch_5m(sym, "1d").get(t.date())
+            trade = orb.simulate_day(bars) if bars else None
+            if trade:
+                paper["trades"].append({"day": t.date().isoformat(), "symbol": sym, **trade})
+                done_today.append(paper["trades"][-1])
+        paper.setdefault("days_run", []).append(t.date().isoformat())
+        save("paper_orb.json", paper)
+    net_today = sum(x["net"] for x in done_today)
+    allt = paper["trades"]
+    total = sum(x["net"] for x in allt)
+    wins = sum(1 for x in allt if x["net"] > 0)
+    since = min((x["day"] for x in allt), default=t.date().isoformat())
+    return [
+        f"Paper intraday test (skills' ORB on top-20 leaders, Rs10k/trade, after charges): "
+        f"today {len(done_today)} trades Rs{net_today:+,.0f}; since {since}: {len(allt)} trades, "
+        f"Rs{total:+,.0f}, {wins / len(allt) * 100 if allt else 0:.0f}% wins"
+    ]
 
 
 def job_evening() -> dict:
@@ -268,8 +363,26 @@ def job_evening() -> dict:
     nxt = next_rebalance(st, s["gap"])
     if nxt:
         lines += ["", f"Next rebalance {nxt:%a %d %b} - you'll get a tap-to-review link."]
+    lines += ["", *paper_orb_lines(t)]
     lines += ["", "Not investment advice."]
     notify(f"Monthly momentum picks - {as_of:%d %b}", "\n".join(lines))
+
+    if ledger:
+        con = db.connect()
+        try:
+            watch = db.names(con, list(ledger))
+        finally:
+            con.close()
+        flagged, _err = news_red_flags(watch, hours=30)
+        seen = set(st.setdefault("news_seen", []))
+        fresh = [f for f in flagged if f["id"] not in seen]
+        if fresh:
+            st["news_seen"] = (st["news_seen"] + [f["id"] for f in fresh])[-300:]
+            save("state.json", st)
+            notify(
+                "NEWS RED FLAG - stocks the bot holds",
+                "\n".join([*flag_lines(fresh), "", "Facts to check, not advice. Your GTT stops stay active."]),
+            )
 
     hits = []
     for sym, pos in ledger.items():
@@ -423,6 +536,7 @@ def plan_page(kite: Kite, st: dict, intent: str, account: Check, ddpi: Check) ->
         notes.append(
             f"Free cash Rs{free_cash:,.0f} (incl. ~90% of sale proceeds), budget Rs{bp.budget:,.0f}, slot Rs{bp.per_stock:,.0f}"
         )
+        notes += (st.get("pending") or {}).get("news", [])
         title = f"Rebalance {t:%B %Y}"
     save("state.json", st)
     save(
@@ -654,7 +768,15 @@ def lambda_handler(event, context):
             finally:
                 con.close()
             recs = db.fetch_bhavcopy(d)
-            return {"latest_db_date": str(d), "bhavcopy_rows": None if recs is None else len(recs)}
+            flagged, news_err = news_red_flags({"RELIANCE": "Reliance Industries Limited"}, hours=24 * 7)
+            return {
+                "latest_db_date": str(d),
+                "bhavcopy_rows": None if recs is None else len(recs),
+                "news_ok": not any("not deployed" in e or "failed" in e for e in news_err),
+                "news_notes": news_err,
+                "holidays": len(holidays()),
+                "yahoo_5m_bars": sum(len(v) for v in orb.fetch_5m("RELIANCE", "5d").values()),
+            }
         return {"error": f"unknown job {job!r}"}
     except Exception as exc:
         notify("Momentum bot ERROR", f"{type(exc).__name__}: {exc}")
