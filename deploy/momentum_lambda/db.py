@@ -170,9 +170,3 @@ def catch_up(con, today: date, max_days: int = 10) -> list[str]:
                 log.append(f"{d}: upserted {upsert_day(con, d, recs)} bars")
         d += timedelta(days=1)
     return log
-
-
-def names(con, symbols: list[str]) -> dict[str, str]:
-    if not symbols:
-        return {}
-    return dict(con.run("select symbol, name from stocks where symbol = any(:s)", s=symbols))
