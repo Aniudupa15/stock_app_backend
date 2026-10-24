@@ -304,10 +304,10 @@ def job_morning() -> dict:
     return {"pending": picks}
 
 
-def paper_orb_lines(t: datetime) -> list[str]:
+def paper_orb_lines(t: datetime, persist: bool = True, fallback_leaders: list[str] | None = None) -> list[str]:
     """Replay today's ORB (skills' rules) on this morning's leaders; keep a running paper ledger."""
     paper = load("paper_orb.json", {"trades": [], "leaders": {}})
-    syms = paper.get("leaders", {}).get(t.date().isoformat())
+    syms = paper.get("leaders", {}).get(t.date().isoformat()) or fallback_leaders
     if not syms:
         return []
     done_today = [x for x in paper["trades"] if x["day"] == t.date().isoformat()]
@@ -319,7 +319,8 @@ def paper_orb_lines(t: datetime) -> list[str]:
                 paper["trades"].append({"day": t.date().isoformat(), "symbol": sym, **trade})
                 done_today.append(paper["trades"][-1])
         paper.setdefault("days_run", []).append(t.date().isoformat())
-        save("paper_orb.json", paper)
+        if persist:
+            save("paper_orb.json", paper)
     net_today = sum(x["net"] for x in done_today)
     allt = paper["trades"]
     total = sum(x["net"] for x in allt)
@@ -332,9 +333,12 @@ def paper_orb_lines(t: datetime) -> list[str]:
     ]
 
 
-def job_evening() -> dict:
-    """Weekday 19:15: price sync -> monthly-momentum picks report; stop-loss alert only when a stop breaks."""
-    t = now()
+def job_evening(preview_day: date | None = None) -> dict:
+    """Weekday 19:15: price sync -> monthly-momentum picks report; stop-loss alert only when a stop breaks.
+    preview_day: build the message as of that day, marked [FORMAT TEST], without saving any state."""
+    t = datetime(preview_day.year, preview_day.month, preview_day.day, 19, 15, tzinfo=IST) if preview_day else now()
+    tag = "[FORMAT TEST] " if preview_day else ""
+    save = (lambda _k, _o: None) if preview_day else globals()["save"]
     st, s = load_state(), settings()
     con = db.connect()
     try:
@@ -363,9 +367,12 @@ def job_evening() -> dict:
     nxt = next_rebalance(st, s["gap"])
     if nxt:
         lines += ["", f"Next rebalance {nxt:%a %d %b} - you'll get a tap-to-review link."]
-    lines += ["", *paper_orb_lines(t)]
+    leaders = None
+    if preview_day:  # no morning snapshot for a past day: use that day's ranking for the format test
+        leaders = (picks + [r[0] for r in rows if r[0] not in picks])[:20]
+    lines += ["", *paper_orb_lines(t, persist=not preview_day, fallback_leaders=leaders)]
     lines += ["", "Not investment advice."]
-    notify(f"Monthly momentum picks - {as_of:%d %b}", "\n".join(lines))
+    notify(f"{tag}Monthly momentum picks - {as_of:%d %b}", "\n".join(lines))
 
     if ledger:
         con = db.connect()
@@ -380,7 +387,7 @@ def job_evening() -> dict:
             st["news_seen"] = (st["news_seen"] + [f["id"] for f in fresh])[-300:]
             save("state.json", st)
             notify(
-                "NEWS RED FLAG - stocks the bot holds",
+                f"{tag}NEWS RED FLAG - stocks the bot holds",
                 "\n".join([*flag_lines(fresh), "", "Facts to check, not advice. Your GTT stops stay active."]),
             )
 
@@ -395,7 +402,7 @@ def job_evening() -> dict:
             )
     if hits:
         notify(
-            "STOP-LOSS ALERT - momentum bot",
+            f"{tag}STOP-LOSS ALERT - momentum bot",
             "\n".join(
                 [
                     *hits,
@@ -761,6 +768,8 @@ def lambda_handler(event, context):
             return job_morning()
         if job == "evening":
             return job_evening()
+        if job == "preview":  # format check: the evening message as of a past day, nothing saved
+            return job_evening(preview_day=date.fromisoformat(event["day"]))
         if job == "selftest":  # manual check: can this Lambda download NSE files + reach the DB?
             con = db.connect()
             try:
