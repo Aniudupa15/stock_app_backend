@@ -538,6 +538,118 @@ def sync_page(st: dict) -> dict:
     )
 
 
+# Liquid NSE stocks 2015-2026 (research/, ~100k cases): bought 6-12 months earlier, share that got back
+# to the buy price within 12 / 24 months, and the median return over the next 12 months.
+BASE_RATES = (  # (loss at least, label, back within 12m, back within 24m, median next 12m)
+    (0.60, "down >60%", 0.09, 0.21, -0.01),
+    (0.40, "down 40-60%", 0.24, 0.44, 0.05),
+    (0.20, "down 20-40%", 0.41, 0.62, 0.06),
+    (0.00, "down 0-20%", 0.75, 0.85, 0.07),
+)
+
+
+def cnc_sell_price_for(avg: float, qty: int, net_gain: float) -> float:
+    """Sell price that leaves `net_gain` (e.g. 0.02) over cost after delivery charges on both legs:
+    STT 0.1% each side, stamp 0.015% buy, NSE txn 0.00297% + SEBI, GST 18% on those, DP Rs15.93."""
+    buy_cost = qty * avg * (1 + 0.001 + 0.00015 + 0.0000307 * 1.18)
+    want = buy_cost * (1 + net_gain) + 15.93
+    price = want / (qty * (1 - 0.001 - 0.0000307 * 1.18))
+    return price
+
+
+def factsheet_page(kite: Kite) -> dict:
+    """Read-only fact sheet of ALL Zerodha holdings: facts per stock, no recommendations."""
+    t = now()
+    hold = []
+    for h in kite.holdings():
+        q = int(h["quantity"]) + int(h.get("t1_quantity") or 0)
+        if q > 0:
+            hold.append(
+                (base(h["tradingsymbol"]), h["tradingsymbol"], q, float(h["average_price"]), float(h["last_price"]))
+            )
+    if not hold:
+        return page("Fact sheet", "<p>No holdings found.</p>")
+    syms = [x[0] for x in hold]
+    con = db.connect()
+    try:
+        series = db.close_series(con, syms, days=400)
+        order = [r[0] for r in db.ranking_rows(con, take=300)]
+        as_of = db.latest_trade_date(con)
+    finally:
+        con.close()
+    bot = set(load_state().get("ledger", {}))
+    tot_cost = sum(q * a for _s, _t, q, a, _l in hold)
+    tot_val = sum(q * ltp for _s, _t, q, _a, ltp in hold)
+    blocks = []
+    for sym, tsym, q, avg, ltp in sorted(hold, key=lambda x: x[4] / x[3]):
+        pnl = ltp / avg - 1
+        need = avg / ltp - 1 if ltp < avg else 0.0
+        cs = series.get(sym, [])
+        yr = cs[-252:] if cs else []
+        rank = order.index(sym) + 1 if sym in order else None
+        tick = orb_tick(ltp)
+        be = cnc_sell_price_for(avg, q, 0.0)
+        p2 = cnc_sell_price_for(avg, q, 0.02)
+        p5 = cnc_sell_price_for(avg, q, 0.05)
+        lines = [
+            f"*{sym}*{' [bot]' if sym in bot else ''}{'' if tsym == sym else f' (trades as {tsym})'}",
+            f"  {q} x Rs{avg:,.2f} -> Rs{ltp:,.2f}   P&L Rs{q * (ltp - avg):+,.0f} ({pnl:+.1%})   "
+            f"{q * ltp / tot_val:.0%} of portfolio",
+        ]
+        if pnl < 0:
+            rate = next(r for r in BASE_RATES if -pnl >= r[0])
+            lines.append(f"  needs +{need:.0%} to get back to your buy price")
+            lines.append(
+                f"  history ({rate[1]}): back to buy price {rate[2]:.0%} within 12m, {rate[3]:.0%} within 24m; "
+                f"median next 12m {rate[4]:+.0%}"
+            )
+        if len(yr) > 20:
+            hi, lo = max(yr), min(yr)
+            one_y = f"{cs[-1] / cs[-252] - 1:+.0%}" if len(cs) >= 252 else "n/a"
+            lines.append(f"  1-year {one_y} | {cs[-1] / hi - 1:+.0%} vs 52w high | {cs[-1] / lo - 1:+.0%} vs 52w low")
+        lines.append(f"  30-day momentum rank: {f'#{rank} of 300 liquid' if rank else 'outside the liquid top-300'}")
+        lines.append(
+            f"  sell price after all charges: breakeven Rs{round_up(be, tick):,.2f} | +2% Rs{round_up(p2, tick):,.2f} | +5% Rs{round_up(p5, tick):,.2f}"
+        )
+        blocks.append("\n".join(lines))
+    head = [
+        f"{len(hold)} holdings: cost Rs{tot_cost:,.0f} -> now Rs{tot_val:,.0f} "
+        f"({tot_val - tot_cost:+,.0f} / {(tot_val / tot_cost - 1):+.1%}). Live prices; history as of {as_of}.",
+        "Sorted worst first. Facts only - not a recommendation to buy, hold or sell.",
+    ]
+    # Demergers: the broker splits the original cost across the new shares, so judge them together.
+    for parts, origin in ((("TMPV", "TMCV"), "Tata Motors"),):
+        got = [h for h in hold if h[0] in parts]
+        if len(got) == len(parts):
+            c = sum(q * a for _s, _t, q, a, _l in got)
+            v = sum(q * ltp for _s, _t, q, _a, ltp in got)
+            head.append(
+                f"{' + '.join(parts)} come from the {origin} demerger (cost split by the broker) - "
+                f"together: cost Rs{c:,.0f} -> Rs{v:,.0f} ({v / c - 1:+.1%})."
+            )
+    tail = [
+        "Notes: 'history' = how often liquid NSE stocks with a similar loss got back to the buy price (2015-2026).",
+        "Sell prices include STT, exchange/SEBI fees, stamp, GST and the Rs15.93 DP charge; set one in Kite > GTT if you choose.",
+        "Booked losses can offset capital gains and carry forward 8 years if your ITR is filed on time - confirm with a CA.",
+    ]
+    text = "\n".join(head) + "\n\n" + "\n\n".join(blocks) + "\n\n" + "\n".join(tail)
+    notify(f"Portfolio fact sheet ({t:%d %b})", text)
+    return page("Portfolio fact sheet", f"<pre class='note' style='white-space:pre-wrap'>{html.escape(text)}</pre>")
+
+
+def orb_tick(price: float) -> float:
+    for limit, tk in ((250, 0.01), (1000, 0.05), (5000, 0.10), (10000, 0.50), (20000, 1.0)):
+        if price < limit:
+            return tk
+    return 5.0
+
+
+def round_up(x: float, tick: float) -> float:
+    import math
+
+    return round(math.ceil(x / tick - 1e-9) * tick, 2)
+
+
 def portfolio_page(kite: Kite, st: dict, account: Check) -> dict:
     """Read-only: record positions Zerodha sold (GTT stops), report every bot stock at live prices."""
     t, stop_pct = now(), settings()["stop"]
@@ -638,6 +750,8 @@ def handle_http(event: dict) -> dict:
     intent = q.get("intent", "rebalance")
     if intent == "portfolio":
         return portfolio_page(kite, st, account)
+    if intent == "factsheet":
+        return factsheet_page(kite)
     return plan_page(kite, st, intent if intent in ("rebalance", "stop") else "rebalance", account, ddpi)
 
 
