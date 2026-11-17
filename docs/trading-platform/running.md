@@ -93,3 +93,21 @@ How F&O is modelled (`libs/derivatives`, `libs/charges/nse_fno.py`):
 - **Expiry.** `settle_expired()` closes positions at their settlement value
   (futures at the underlying, options at intrinsic value) and journals
   `EXPIRY` trades.
+
+### Backtesting the F&O strategy
+
+```bash
+python scripts/fno_backtest.py --underlying NIFTY --instrument FUT --from 2025-11-01
+python scripts/fno_backtest.py --underlying NIFTY --instrument CE --from 2026-05-01 --trades-csv trades.csv
+```
+
+The backtest replays Kite 1-minute history through the same strategy, OMS,
+risk gate, charges and paper venue as the live paper script. It needs
+historical-data access on your Kite Connect app. Downloads are cached in
+`scripts/state/fno_backtest/`, and `--csv` / `--vix-csv` run it without Kite.
+
+- **Futures** are proxied by the index; the futures basis is ignored.
+- **Options** have no expired-contract history on Kite, so premiums are
+  Black-Scholes modelled from the index and India VIX. Treat option results as
+  indicative.
+- **Lot size** uses today's lot size for the whole period.
