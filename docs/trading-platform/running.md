@@ -111,3 +111,27 @@ historical-data access on your Kite Connect app. Downloads are cached in
   Black-Scholes modelled from the index and India VIX. Treat option results as
   indicative.
 - **Lot size** uses today's lot size for the whole period.
+
+## LIVE NIFTY put trading (`pe-trend`)
+
+`scripts/fno_live_trade.py` runs the backtested `pe-trend` rules. It starts as
+a **dry run**: live prices, simulated fills, no orders sent.
+
+Real orders need `--live`, `FNO_LIVE=true` in `.env`, and the pre-flight
+checks to pass:
+- `KITE_USER_ID` matches the logged-in account
+- this PC's IP is in `KITE_ALLOWED_IPS` (the static IP whitelisted on the Kite app)
+- no open F&O position or working bot order
+
+Risk rails:
+- 1 lot maximum.
+- `--daily-loss-limit` (default ₹3,000). A signal whose stop-loss risk exceeds
+  the remaining limit is skipped.
+- An SL order rests at the exchange from the moment the entry fills. It trails
+  30% below the premium's high in ₹2 steps, and is re-placed when Zerodha's
+  per-order modification cap is reached.
+- Everything is sold at 15:15 (MIS, with Zerodha's ~15:20 auto square-off as a
+  backstop).
+
+Schedule `scripts/run_fno_live.bat` for 09:00 Mon-Fri. Add `--live` to it only
+after dry-run days look right. The journal is written to `scripts/state/fno_live/`.
