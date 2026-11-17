@@ -132,6 +132,7 @@ def main() -> None:
     p.add_argument("--csv", type=Path, help="underlying 1-minute candles (skip Kite)")
     p.add_argument("--vix-csv", type=Path, help="India VIX 1-minute candles (options, skip Kite)")
     p.add_argument("--access-token", default=os.environ.get("KITE_ACCESS_TOKEN"))
+    p.add_argument("--request-token", help="request_token from the Kite login redirect URL")
     p.add_argument("--trades-csv", type=Path, help="also write every trade to this CSV")
     args = p.parse_args()
 
@@ -143,7 +144,7 @@ def main() -> None:
 
         api_key = os.environ.get("KITE_API_KEY") or sys.exit("Missing KITE_API_KEY in .env")
         api_secret = os.environ.get("KITE_API_SECRET") or sys.exit("Missing KITE_API_SECRET in .env")
-        kite = ReadOnlyKite(login(api_key, api_secret, args.access_token))
+        kite = ReadOnlyKite(login(api_key, api_secret, args.access_token, args.request_token))
 
     candles = read_csv(args.csv) if args.csv else fetch_minutes(kite, spot_key(underlying), args.start, args.end)
     vix = None
