@@ -15,6 +15,7 @@ import html
 import json
 import os
 import smtplib
+import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -720,11 +721,30 @@ def portfolio_page(kite: Kite, st: dict, account: Check) -> dict:
     return page("Bot portfolio", f"<pre class='note' style='white-space:pre-wrap'>{html.escape(text)}</pre>")
 
 
+def local_forward(q: dict) -> dict | None:
+    """Logins started by the PC scripts (F&O paper trading / backtest) carry
+    redirect_params fwd=local&port=N. Bounce the browser to that script's
+    listener on the SAME machine (127.0.0.1) without touching the single-use
+    request_token, so the PC script can exchange it. Only localhost and a
+    numeric port are ever used, so this can't redirect anywhere else."""
+    if q.get("fwd") != "local":
+        return None
+    port = q.get("port", "5010")
+    if not port.isdigit() or not 1024 <= int(port) <= 65535:
+        return page("Login not forwarded", "<p>Invalid port.</p>", 400)
+    keep = {k: q[k] for k in ("action", "type", "status", "request_token") if k in q}
+    target = f"http://127.0.0.1:{port}/kite/callback?{urllib.parse.urlencode(keep)}"
+    return {"statusCode": 302, "headers": {"Location": target, "Cache-Control": "no-store"}, "body": ""}
+
+
 def handle_http(event: dict) -> dict:
     path = event.get("rawPath", "/")
     q = event.get("queryStringParameters") or {}
     if path != "/kite/callback":
         return {"statusCode": 404, "body": "not found"}
+    forward = local_forward(q)
+    if forward is not None:
+        return forward
     st = load_state()
     if q.get("action") == "basket" or (q.get("type") == "basket"):
         return sync_page(st)
@@ -746,7 +766,8 @@ def handle_http(event: dict) -> dict:
     prof = kite.profile()
     account = check_account(cfg("KITE_USER_ID") or None, prof["user_id"])
     consent = (prof.get("meta") or {}).get("demat_consent", "unknown")
-    ddpi = Check("DDPI", consent == "consent", f"demat_consent={consent}")
+    # Kite reports "consent" for POA and "ddpi" for an active DDPI - both allow auto sells.
+    ddpi = Check("DDPI", consent in ("consent", "ddpi"), f"demat_consent={consent}")
     intent = q.get("intent", "rebalance")
     if intent == "portfolio":
         return portfolio_page(kite, st, account)
