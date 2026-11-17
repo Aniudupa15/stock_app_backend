@@ -40,7 +40,10 @@ CRON=$(cat <<CR
 # --- end fno bot ---
 CR
 )
-( crontab -l 2>/dev/null | sed '/--- fno bot/,/--- end fno bot/d'; echo "$CRON" ) | crontab -
+# A fresh server has no crontab: `crontab -l` exits 1, which under pipefail silently killed
+# this script here before - tolerate it explicitly.
+EXISTING=$(crontab -l 2>/dev/null || true)
+printf '%s\n%s\n' "$(printf '%s\n' "$EXISTING" | sed '/--- fno bot/,/--- end fno bot/d')" "$CRON" | crontab -
 
 echo "== smoke test"
 "$PY" -c "import kiteconnect; import sys; sys.path.insert(0, '$APP'); import services.trading_service.fno_live; print('imports ok')"
