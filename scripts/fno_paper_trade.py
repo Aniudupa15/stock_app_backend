@@ -158,8 +158,14 @@ def login(api_key: str, api_secret: str, access_token: str | None, request_token
         except Exception as exc:
             log(f"ngrok not started ({exc}) - paste the redirected URL instead")
     deadline = datetime.now(IST) + timedelta(minutes=30)
+    # Kite echoes `redirect_params` back to the app's redirect URL. A hosted
+    # callback (e.g. the rebalance bot's Lambda) can see fwd=local and bounce
+    # the browser to this PC WITHOUT exchanging the single-use token.
+    from urllib.parse import quote
+
+    login_link = f"{kite.login_url()}&redirect_params={quote(f'fwd=local&port={port}')}"
     log(
-        f"Open this link to log in to Kite (waiting until {deadline:%H:%M} IST):\n  {kite.login_url()}\n"
+        f"Open this link to log in to Kite (waiting until {deadline:%H:%M} IST):\n  {login_link}\n"
         "If the page after login doesn't load, copy the FULL address from the browser bar "
         "(it contains request_token=...) and paste it here, then press Enter."
     )
