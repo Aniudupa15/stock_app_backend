@@ -70,6 +70,48 @@ def _save_token(token: str) -> None:
     SESSION_FILE.write_text(json.dumps({"access_token": token, "expires_at": expires.isoformat()}))
 
 
+def _wait_for_redirect(host: str, port: int, deadline: datetime, accept, pasted) -> bool:
+    """Catch Kite's redirect (/kite/callback?request_token=...) on host:port.
+    Returns early if the user pasted a token instead. If another program
+    (e.g. the rebalance bot) already holds the port, rely on pasting."""
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.parse import parse_qs, urlparse
+
+    done = threading.Event()
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            q = parse_qs(urlparse(self.path).query)
+            tok = q.get("request_token", [None])[0]
+            ok = bool(tok) and not done.is_set() and accept(tok)
+            if ok:
+                done.set()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            msg = b"Login received - you can close this tab." if ok or done.is_set() else b"Login failed - try again."
+            self.wfile.write(b"<h2>" + msg + b"</h2>")
+
+        def log_message(self, *args):
+            pass
+
+    try:
+        server = ThreadingHTTPServer((host, port), Handler)
+    except OSError:
+        log(f"Port {port} is busy (is the rebalance bot running?) - paste the redirected URL instead")
+        server = None
+    if server:
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        while not (done.is_set() or pasted.is_set()) and datetime.now(IST) < deadline:
+            done.wait(timeout=1)
+    finally:
+        if server:
+            server.shutdown()
+    return done.is_set() or pasted.is_set()
+
+
 def login(api_key: str, api_secret: str, access_token: str | None, request_token: str | None = None):
     """Kite session for MARKET DATA. Order of preference: explicit access
     token, today's cached token, a pasted request_token, then the browser
@@ -104,7 +146,7 @@ def login(api_key: str, api_secret: str, access_token: str | None, request_token
 
     import threading
 
-    from scripts.zerodha_rebalance import start_ngrok, wait_for_login
+    from scripts.zerodha_rebalance import start_ngrok
 
     port = int(os.environ.get("KITE_CALLBACK_PORT", "5010"))
     bind = os.environ.get("KITE_CALLBACK_BIND", "127.0.0.1")
@@ -136,7 +178,7 @@ def login(api_key: str, api_secret: str, access_token: str | None, request_token
 
     threading.Thread(target=read_paste, daemon=True).start()
     try:
-        ok = wait_for_login(bind, port, deadline, lambda tok: pasted.is_set() or accept(tok), stop=pasted)
+        ok = _wait_for_redirect(bind, port, deadline, accept, pasted)
     finally:
         if tunnel:
             tunnel.terminate()
