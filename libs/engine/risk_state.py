@@ -19,7 +19,8 @@ class RiskStateBuilder:
 
     async def build(self, symbol: str) -> RiskState:
         positions = await self._venue.positions()
-        cash = self._venue.cash()  # paper venue exposes cash()/equity()
+        # Free funds after F&O margin (equals cash for an equity-only book).
+        cash = (await self._venue.available_margin()).available
         equity = self._venue.equity()
         today = self._clock().date()
 

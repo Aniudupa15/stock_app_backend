@@ -146,7 +146,8 @@ class ZerodhaAdapter(BrokerAdapter):
                 Position(
                     account_id=self._account_id,
                     symbol=p["tradingsymbol"],
-                    product=Product(p["product"]) if p.get("product") in ("MIS", "CNC") else Product.MIS,
+                    # NRML (F&O carry-forward) used to be mislabelled MIS here.
+                    product=Product(p["product"]) if p.get("product") in Product.__members__ else Product.MIS,
                     net_qty=int(p["quantity"]),
                     avg_price=Decimal(str(p.get("average_price", 0))),
                     realized_pnl=Decimal(str(p.get("realised", 0))),

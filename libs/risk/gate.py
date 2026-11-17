@@ -81,7 +81,12 @@ class RiskGate:
         calendar: TradingCalendar,
         entry_price: Decimal,
         stop_loss: Decimal | None = None,
+        lot_size: int = 1,
+        funds_per_unit: Decimal | None = None,
     ) -> RiskVerdict:
+        """`lot_size` > 1 (F&O) rounds the approved quantity DOWN to whole
+        lots. `funds_per_unit` is what one unit ties up (F&O margin, or premium
+        for an option buy); it defaults to `entry_price` (cash equity)."""
         # --- Exits are always allowed (never trap a position) ---
         if self._is_reducing(intent, state.current_net_qty):
             return RiskVerdict(RiskDecision.ALLOW, intent.quantity)
@@ -115,8 +120,9 @@ class RiskGate:
         if profile.max_exposure is not None and entry_price > 0:
             remaining = profile.max_exposure - state.current_exposure
             caps.append((max(0, int(remaining / entry_price)), "max exposure"))
-        if entry_price > 0:
-            caps.append((int(state.available_cash / entry_price), "insufficient margin"))
+        per_unit = funds_per_unit if funds_per_unit is not None else entry_price
+        if per_unit > 0:
+            caps.append((max(0, int(state.available_cash / per_unit)), "insufficient margin"))
 
         final_qty = intent.quantity
         binding_reason = None
@@ -125,6 +131,10 @@ class RiskGate:
                 final_qty = cap_qty
                 binding_reason = reason
 
+        if lot_size > 1:
+            final_qty -= final_qty % lot_size
+            if final_qty <= 0:
+                return self._reject(f"{binding_reason or 'risk limits'}: less than one lot ({lot_size})")
         if final_qty <= 0:
             return self._reject(binding_reason or "risk limits allow zero quantity")
         if final_qty < intent.quantity:

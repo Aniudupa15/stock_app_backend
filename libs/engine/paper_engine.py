@@ -4,6 +4,11 @@ One call, `process_tick`, does the full cycle for a symbol:
   1. advance existing orders (fill resting entries/children, run OCO, trail SL)
   2. if flat and a strategy fires -> risk-gate the entry -> submit a bracket
 
+F&O: pass a `ContractRegistry` and any symbol in it is traded as a
+derivative - `Strategy.quantity` then means LOTS (converted to units with the
+contract's lot size), the order goes to the contract's exchange (NFO), a CNC
+strategy maps to NRML, and the risk gate sizes on margin rather than notional.
+
 No broker code anywhere: swap the `PaperExecutionVenue` for a
 `BrokerExecutionVenue` and the identical loop trades live (Phase 2 P1).
 """
@@ -11,15 +16,19 @@ No broker code anywhere: swap the `PaperExecutionVenue` for a
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import date
+from decimal import Decimal
 from uuid import UUID, uuid4
 
+from libs.derivatives.contracts import ContractRegistry
+from libs.derivatives.margin import FnoMarginModel
 from libs.engine.risk_state import RiskStateBuilder
 from libs.oms.oms import OrderManagementSystem
 from libs.risk.gate import RiskGate, RiskProfile
 from libs.strategy.engine import Strategy, StrategyEvaluator
 from libs.trading_calendar.calendar import TradingCalendar
-from libs.trading_domain.entities import BracketSpec, MarketQuote, OrderIntent, Signal
-from libs.trading_domain.enums import OrderType
+from libs.trading_domain.entities import BracketSpec, Fill, MarketQuote, OrderIntent, Signal
+from libs.trading_domain.enums import OrderType, Product, Side
 from libs.trading_domain.ports import ExecutionVenuePort
 
 
@@ -35,6 +44,8 @@ class PaperTradingEngine:
         clock,
         strategies: list[Strategy],
         evaluator: StrategyEvaluator | None = None,
+        contracts: ContractRegistry | None = None,
+        margin_model: FnoMarginModel | None = None,
     ) -> None:
         self._account_id = account_id
         self._venue = venue
@@ -47,6 +58,8 @@ class PaperTradingEngine:
         self._evaluator = evaluator or StrategyEvaluator()
         self._state_builder = RiskStateBuilder(venue, oms, clock)
         self._active: dict[str, str] = {}  # symbol -> live bracket_id
+        self._contracts = contracts or ContractRegistry()
+        self._margin = margin_model or FnoMarginModel()
 
     async def process_tick(
         self,
@@ -76,14 +89,25 @@ class PaperTradingEngine:
             if signal is None:
                 continue
 
+            contract = self._contracts.get(symbol)
+            quantity, product, exchange = strategy.quantity, strategy.product, "NSE"
+            lot_size, funds_per_unit = 1, None
+            if contract is not None:
+                lot_size = contract.lot_size
+                quantity = strategy.quantity * lot_size
+                product = Product.NRML if strategy.product is Product.CNC else strategy.product
+                exchange = contract.exchange
+                sign = 1 if strategy.side is Side.BUY else -1
+                funds_per_unit = self._margin.entry_cost_per_unit(contract, sign, quote.ltp)
             intent = OrderIntent(
                 intent_id=uuid4(),
                 account_id=self._account_id,
                 symbol=symbol,
                 side=strategy.side,
                 order_type=OrderType.MARKET,
-                product=strategy.product,
-                quantity=strategy.quantity,
+                product=product,
+                quantity=quantity,
+                exchange=exchange,
                 strategy_id=strategy.strategy_id,
                 signal_id=None,
             )
@@ -95,6 +119,8 @@ class PaperTradingEngine:
                 calendar=self._calendar,
                 entry_price=quote.ltp,
                 stop_loss=signal.stop_loss,
+                lot_size=lot_size,
+                funds_per_unit=funds_per_unit,
             )
             if not verdict.allowed:
                 continue
@@ -111,3 +137,19 @@ class PaperTradingEngine:
                 self._active[symbol] = result.bracket_id
                 return signal
         return None
+
+    async def square_off(self, symbol: str) -> int:
+        """Flatten `symbol` at market (intraday MIS square-off / manual exit)."""
+        sent = await self._oms.square_off(symbol)
+        await self._oms.process()
+        return sent
+
+    async def settle_expiries(self, as_of: date, underlying_prices: dict[str, Decimal]) -> list[Fill]:
+        """Settle expired F&O positions at exchange settlement value and
+        journal them as EXPIRY trades. Paper venue only."""
+        fills = self._venue.settle_expired(as_of, underlying_prices)
+        await self._oms.process()  # drain cancellations of resting children
+        for fill in fills:
+            self._oms.close_by_settlement(fill)
+            self._active.pop(fill.symbol, None)
+        return fills

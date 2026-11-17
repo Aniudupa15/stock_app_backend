@@ -11,20 +11,33 @@ Scope of v1 (documented, not hidden):
     refinement; size shows up as wider slippage instead.
   * LIMIT / SL / SL_M rest until a tick crosses their price/trigger, then fill
     via `on_tick(quote)` (the engine's paper loop feeds ticks in).
-  * Cash is tracked at full notional (no intraday leverage). Margin sufficiency
-    is the risk engine's concern, not the venue's.
+  * Equity cash is tracked at full notional (no intraday leverage). Margin
+    sufficiency for equity is the risk engine's concern, not the venue's.
+
+F&O (when a `ContractRegistry` is supplied and the intent's exchange is NFO/BFO):
+  * Orders must be whole lots, on a known, unexpired contract, product MIS/NRML.
+  * Futures are margined, not paid for: no notional changes hands; realised
+    P&L and charges hit cash, unrealised MTM counts toward available funds.
+  * Options are premium-settled: a BUY pays the premium, a SELL receives it.
+  * Opening orders are rejected (like a broker's RMS would) if the margin
+    proxy in `FnoMarginModel` exceeds available funds.
+  * `settle_expired()` closes positions in expired contracts at their
+    settlement value (futures -> underlying, options -> intrinsic).
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from libs.charges.models import Side
+from libs.charges import nse_fno
+from libs.charges.models import Charges, Side
 from libs.charges.nse_equity import DEFAULT_NSE_EQUITY_SCHEDULE, ChargeSchedule, compute
+from libs.derivatives.contracts import FNO_EXCHANGES, ContractRegistry, FnoContract, InstrumentKind
+from libs.derivatives.margin import FnoMarginModel
 from libs.execution.slippage import SlippageModel
 from libs.trading_calendar.calendar import TradingCalendar
 from libs.trading_domain.entities import (
@@ -36,7 +49,7 @@ from libs.trading_domain.entities import (
     OrderIntent,
     Position,
 )
-from libs.trading_domain.enums import OrderState, OrderType
+from libs.trading_domain.enums import OrderState, OrderType, Product
 from libs.trading_domain.ports import EventSink, ExecutionVenuePort, QuoteSourcePort
 
 # Clock is injected so tests and backtests control "now".
@@ -74,6 +87,9 @@ class PaperExecutionVenue(ExecutionVenuePort):
         starting_cash: Decimal,
         schedule: ChargeSchedule = DEFAULT_NSE_EQUITY_SCHEDULE,
         slippage: SlippageModel | None = None,
+        contracts: ContractRegistry | None = None,
+        fno_schedule: nse_fno.FnoChargeSchedule = nse_fno.DEFAULT_NSE_FNO_SCHEDULE,
+        margin_model: FnoMarginModel | None = None,
     ) -> None:
         self._account_id = account_id
         self._quotes = quote_source
@@ -83,6 +99,10 @@ class PaperExecutionVenue(ExecutionVenuePort):
         self._starting_cash = starting_cash
         self._schedule = schedule
         self._slippage = slippage or SlippageModel()
+        self._contracts = contracts or ContractRegistry()
+        self._fno_schedule = fno_schedule
+        self._margin = margin_model or FnoMarginModel()
+        self._settle_counter = 0
         self._positions: dict[tuple[str, str], _MutablePosition] = {}
         self._resting: list[_RestingOrder] = []
         self._last_price: dict[str, Decimal] = {}
@@ -106,6 +126,11 @@ class PaperExecutionVenue(ExecutionVenuePort):
 
         if self._circuit_blocks(intent, quote):
             return self._reject(intent, "circuit locked", order_id=order_id)
+
+        if intent.exchange in FNO_EXCHANGES:
+            problem = self._fno_problem(intent, quote, now.date())
+            if problem:
+                return self._reject(intent, problem, order_id=order_id)
 
         if intent.order_type is OrderType.MARKET:
             price = self._slippage.adjust(
@@ -157,7 +182,7 @@ class PaperExecutionVenue(ExecutionVenuePort):
         return out
 
     async def available_margin(self) -> Margin:
-        return Margin(available=self._cash)
+        return Margin(available=self._cash + self._futures_mtm() - self.blocked_margin())
 
     # --- paper-specific: tick-driven resting-order fills ---
 
@@ -188,13 +213,57 @@ class PaperExecutionVenue(ExecutionVenuePort):
         return None
 
     def equity(self) -> Decimal:
-        """Cash + mark-to-market of open positions at last seen prices."""
+        """Cash + mark-to-market of open positions at last seen prices.
+        Futures contribute only their unrealised P&L (no notional was paid)."""
         mtm = Decimal("0")
         for (symbol, _), pos in self._positions.items():
             ltp = self._last_price.get(symbol)
-            if ltp is not None:
-                mtm += Decimal(pos.net_qty) * ltp
-        return self._cash + mtm
+            if ltp is None or self._is_future(symbol):
+                continue
+            mtm += Decimal(pos.net_qty) * ltp
+        return self._cash + mtm + self._futures_mtm()
+
+    def blocked_margin(self) -> Decimal:
+        """Margin held against open F&O positions (paper proxy)."""
+        total = Decimal("0")
+        for (symbol, _), pos in self._positions.items():
+            contract = self._contracts.get(symbol)
+            if contract is None or pos.net_qty == 0:
+                continue
+            price = self._last_price.get(symbol, pos.avg_price)
+            total += self._margin.blocked(contract, pos.net_qty, price)
+        return total
+
+    def settle_expired(self, as_of: date, underlying_prices: dict[str, Decimal]) -> list[Fill]:
+        """Settle every open position in a contract that expired before
+        `as_of` (or on it - call after the close on expiry day). Resting
+        orders in those contracts are cancelled. `underlying_prices` maps
+        underlying -> final settlement price; positions whose underlying is
+        missing are left open (and reported by the caller)."""
+        settled: list[Fill] = []
+        now = self._clock()
+        for (symbol, product), pos in list(self._positions.items()):
+            contract = self._contracts.get(symbol)
+            if contract is None or pos.net_qty == 0 or contract.expiry > as_of:
+                continue
+            spot = underlying_prices.get(contract.underlying)
+            if spot is None:
+                continue
+            for r in [r for r in self._resting if r.intent.symbol == symbol]:
+                self._resting.remove(r)
+                self._emit(OrderEvent(r.order_id, r.intent.intent_id, OrderState.CANCELLED, 0, 0, Decimal("0"), now))
+            price = contract.settlement_price(spot)
+            qty = abs(pos.net_qty)
+            side = Side.SELL if pos.net_qty > 0 else Side.BUY
+            charges = nse_fno.compute_settlement(contract.kind, pos.net_qty, price, schedule=self._fno_schedule)
+            self._settle_counter += 1
+            order_id = f"SETTLE-{self._settle_counter:06d}"
+            self._apply_cash(contract, side, qty, price, charges, symbol, Product(product))
+            self._last_price[symbol] = price
+            fill = Fill(order_id, None, symbol, side, qty, price, charges, now)
+            self.fills.append(fill)
+            settled.append(fill)
+        return settled
 
     def _next_id(self) -> str:
         self._counter += 1
@@ -258,21 +327,98 @@ class PaperExecutionVenue(ExecutionVenuePort):
         )
 
     def _execute(self, order_id: str, intent: OrderIntent, qty: int, price: Decimal, now: datetime) -> None:
-        charges = compute(intent.side, intent.product, qty, price, schedule=self._schedule)
-        notional = Decimal(qty) * price
-        if intent.side is Side.BUY:
-            self._cash -= notional + charges.total
+        contract = self._fno_contract(intent)
+        if contract is not None:
+            charges = nse_fno.compute(intent.side, contract.kind, qty, price, schedule=self._fno_schedule)
         else:
-            self._cash += notional - charges.total
-        self._update_position(intent, qty, price)
+            charges = compute(intent.side, intent.product, qty, price, schedule=self._schedule)
+        self._apply_cash(contract, intent.side, qty, price, charges, intent.symbol, intent.product)
         fill = Fill(order_id, intent.intent_id, intent.symbol, intent.side, qty, price, charges, now)
         self.fills.append(fill)
         self._emit(OrderEvent(order_id, intent.intent_id, OrderState.COMPLETE, qty, 0, price, now))
 
-    def _update_position(self, intent: OrderIntent, qty: int, price: Decimal) -> None:
-        key = (intent.symbol, intent.product.value)
+    def _apply_cash(
+        self,
+        contract: FnoContract | None,
+        side: Side,
+        qty: int,
+        price: Decimal,
+        charges: Charges,
+        symbol: str,
+        product: Product,
+    ) -> None:
+        """Move cash for one executed leg and update the position."""
+        if contract is not None and contract.kind is InstrumentKind.FUT:
+            # Margined: only realised P&L (and charges) touch cash.
+            pos = self._positions.get((symbol, product.value))
+            before = pos.realized_pnl if pos else Decimal("0")
+            self._update_position(symbol, product, side, qty, price)
+            after = self._positions[(symbol, product.value)].realized_pnl
+            self._cash += after - before - charges.total
+            return
+        notional = Decimal(qty) * price
+        if side is Side.BUY:
+            self._cash -= notional + charges.total
+        else:
+            self._cash += notional - charges.total
+        self._update_position(symbol, product, side, qty, price)
+
+    # --- F&O helpers ---
+
+    def _fno_contract(self, intent: OrderIntent) -> FnoContract | None:
+        if intent.exchange not in FNO_EXCHANGES:
+            return None
+        return self._contracts.get(intent.symbol)
+
+    def _is_future(self, symbol: str) -> bool:
+        contract = self._contracts.get(symbol)
+        return contract is not None and contract.kind is InstrumentKind.FUT
+
+    def _futures_mtm(self) -> Decimal:
+        mtm = Decimal("0")
+        for (symbol, _), pos in self._positions.items():
+            if pos.net_qty == 0 or not self._is_future(symbol):
+                continue
+            ltp = self._last_price.get(symbol)
+            if ltp is not None:
+                mtm += (ltp - pos.avg_price) * pos.net_qty
+        return mtm
+
+    def _fno_problem(self, intent: OrderIntent, quote: MarketQuote, today: date) -> str | None:
+        """Broker-RMS-style validation of an F&O order; None if acceptable."""
+        contract = self._contracts.get(intent.symbol)
+        if contract is None:
+            return "unknown F&O contract"
+        if contract.is_expired(today):
+            return "contract expired"
+        if intent.product is Product.CNC:
+            return "CNC not allowed for F&O (use MIS or NRML)"
+        if intent.quantity % contract.lot_size != 0:
+            return f"quantity must be a multiple of lot size {contract.lot_size}"
+
+        pos = self._positions.get((intent.symbol, intent.product.value))
+        net = pos.net_qty if pos else 0
+        signed = intent.quantity if intent.side is Side.BUY else -intent.quantity
+        closing = min(abs(signed), abs(net)) if net and (net > 0) != (signed > 0) else 0
+        opening = abs(signed) - closing
+        if opening == 0:
+            return None  # pure exit - never blocked
+
+        ref = intent.price if intent.price is not None and intent.order_type is OrderType.LIMIT else quote.ltp
+        before = self._margin.blocked(contract, net, ref)
+        after = self._margin.blocked(contract, net + signed, ref)
+        needed = max(Decimal("0"), after - before)
+        if contract.kind.is_option and intent.side is Side.BUY:
+            needed += Decimal(opening) * ref  # premium paid up front
+        available = self._cash + self._futures_mtm() - self.blocked_margin()
+        if needed > available:
+            return f"insufficient margin: need {needed:.2f}, available {available:.2f}"
+        return None
+
+    def _update_position(self, symbol: str, product: Product, side: Side, qty: int, price: Decimal) -> None:
+        key = (symbol, product.value)
         pos = self._positions.setdefault(key, _MutablePosition())
-        signed = qty if intent.side is Side.BUY else -qty
+        signed = qty if side is Side.BUY else -qty
 
         if pos.net_qty == 0 or (pos.net_qty > 0) == (signed > 0):
             # Opening or increasing in the same direction -> weighted avg.
