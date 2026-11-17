@@ -5,6 +5,8 @@
 # Shows the monthly price and asks before creating anything. Idempotent: re-running reuses
 # what already exists. Prints the static IP to whitelist in Kite (Profile -> IP Whitelist).
 set -euo pipefail
+# Retry transient network errors on reads (creates are guarded by the list checks below).
+export AWS_RETRY_MODE="${AWS_RETRY_MODE:-standard}" AWS_MAX_ATTEMPTS="${AWS_MAX_ATTEMPTS:-6}"
 REGION="${AWS_REGION:-ap-south-1}"
 NAME="${NAME:-fno-bot}"
 BUNDLE="${BUNDLE:-nano_3_1}"        # smallest plan with a public IPv4 (512 MB RAM; setup adds swap)
@@ -26,13 +28,22 @@ if [ "$(lsail get-blueprints --query "blueprints[?blueprintId=='$BLUEPRINT'] | l
   exit 1
 fi
 
-if ! lsail get-instance --instance-name "$NAME" >/dev/null 2>&1; then
+# Existence checks LIST resources instead of treating any error as "not found": on a flaky
+# connection a failed lookup must stop the script, not trigger a duplicate create.
+INSTANCES=$(lsail get-instances --query "length(instances[?name=='$NAME'])" --output text)
+if [ "$INSTANCES" = "0" ]; then
   echo "About to create Lightsail instance '$NAME' ($BUNDLE, $BLUEPRINT) in $ZONE at \$$PRICE/month"
   echo "(new Lightsail accounts may get the first months of this plan free - check the console)."
   read -r -p "Type YES to create it: " ok
   [ "$ok" = "YES" ] || { echo "Cancelled - nothing created."; exit 1; }
 
-  if [ ! -f "$KEY" ]; then
+  KEYPAIRS=$(lsail get-key-pairs --query "length(keyPairs[?name=='$NAME'])" --output text)
+  if [ "$KEYPAIRS" != "0" ] && [ ! -f "$KEY" ]; then
+    echo "Key pair '$NAME' exists in AWS but $KEY is missing - delete the key pair in the"
+    echo "Lightsail console (Account -> SSH keys) or set KEY=<path to the saved .pem>, then re-run."
+    exit 1
+  fi
+  if [ "$KEYPAIRS" = "0" ]; then
     mkdir -p "$(dirname "$KEY")"
     lsail create-key-pair --key-pair-name "$NAME" --query privateKeyBase64 --output text > "$KEY"
     chmod 600 "$KEY"
@@ -48,10 +59,12 @@ for _ in $(seq 60); do
   echo -n "."; sleep 5
 done; echo
 
-if ! lsail get-static-ip --static-ip-name "$NAME-ip" >/dev/null 2>&1; then
+STATIC_IPS=$(lsail get-static-ips --query "length(staticIps[?name=='$NAME-ip'])" --output text)
+if [ "$STATIC_IPS" = "0" ]; then
   lsail allocate-static-ip --static-ip-name "$NAME-ip" >/dev/null
 fi
-if [ "$(lsail get-static-ip --static-ip-name "$NAME-ip" --query staticIp.isAttached --output text)" != "True" ]; then
+ATTACHED=$(lsail get-static-ip --static-ip-name "$NAME-ip" --query staticIp.isAttached --output text)
+if [ "$ATTACHED" != "True" ]; then
   lsail attach-static-ip --static-ip-name "$NAME-ip" --instance-name "$NAME" >/dev/null
 fi
 IP=$(lsail get-static-ip --static-ip-name "$NAME-ip" --query staticIp.ipAddress --output text)
