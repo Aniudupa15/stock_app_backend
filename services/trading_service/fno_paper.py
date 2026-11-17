@@ -47,6 +47,7 @@ class ReadOnlyKite:
             "quote",
             "ltp",
             "ohlc",
+            "historical_data",
             "instruments",
             "profile",
             "margins",

@@ -62,7 +62,7 @@ def parse_kite_quote(symbol: str, raw: dict) -> MarketQuote:
 class KiteQuoteSource(QuoteSourcePort):
     def __init__(self, kite, contracts: ContractRegistry | None = None) -> None:
         self._kite = kite
-        self._contracts = contracts or ContractRegistry()
+        self._contracts = contracts if contracts is not None else ContractRegistry()
 
     def _key(self, symbol: str) -> str:
         contract = self._contracts.get(symbol)

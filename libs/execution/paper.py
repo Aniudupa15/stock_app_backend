@@ -99,7 +99,7 @@ class PaperExecutionVenue(ExecutionVenuePort):
         self._starting_cash = starting_cash
         self._schedule = schedule
         self._slippage = slippage or SlippageModel()
-        self._contracts = contracts or ContractRegistry()
+        self._contracts = contracts if contracts is not None else ContractRegistry()
         self._fno_schedule = fno_schedule
         self._margin = margin_model or FnoMarginModel()
         self._settle_counter = 0

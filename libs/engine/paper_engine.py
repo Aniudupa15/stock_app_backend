@@ -58,7 +58,7 @@ class PaperTradingEngine:
         self._evaluator = evaluator or StrategyEvaluator()
         self._state_builder = RiskStateBuilder(venue, oms, clock)
         self._active: dict[str, str] = {}  # symbol -> live bracket_id
-        self._contracts = contracts or ContractRegistry()
+        self._contracts = contracts if contracts is not None else ContractRegistry()
         self._margin = margin_model or FnoMarginModel()
 
     async def process_tick(

@@ -513,3 +513,17 @@ async def test_full_intraday_futures_session_paper_only():
     assert now["t"].time() >= datetime(2026, 1, 5, 15, 15).time()
     assert any("ENTRY" in line for line in logs)
     assert "PAPER TRADING - no real orders were placed." in report.lines()
+
+
+async def test_contracts_added_after_construction_are_seen():
+    """Regression: an EMPTY registry is falsy - `contracts or ContractRegistry()`
+    used to swap in a fresh one, so later-added contracts were 'unknown'."""
+    registry = ContractRegistry()
+    quotes = Quotes()
+    venue = PaperExecutionVenue(
+        ACCOUNT, quotes, TradingCalendar(), lambda: MON, starting_cash=Decimal("500000"),
+        slippage=NO_SLIP, contracts=registry,
+    )  # fmt: skip
+    registry.add(FUT)
+    quotes.set(FUT.tradingsymbol, "24000")
+    assert (await venue.place(_intent(FUT.tradingsymbol, Side.BUY, 75))).state is OrderState.COMPLETE
