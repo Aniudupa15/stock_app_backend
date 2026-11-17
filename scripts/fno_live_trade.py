@@ -53,6 +53,24 @@ def public_ip() -> str | None:
         return None
 
 
+def background(send):
+    """Alerts (WhatsApp + email via send()) can take minutes when WhatsApp
+    retries; never let them pause order management. Non-daemon threads, so
+    the final summary still goes out before the process exits."""
+    import threading
+
+    def notify(subject: str, body: str) -> None:
+        def run() -> None:
+            try:
+                send(subject, body)
+            except Exception as exc:  # alerting must never crash trading
+                log(f"alert failed: {type(exc).__name__}: {exc}")
+
+        threading.Thread(target=run, name="alert").start()
+
+    return notify
+
+
 def journal(report: LiveReport, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {
@@ -86,7 +104,9 @@ def main() -> None:
     p.add_argument("--max-lots", type=int, default=1)
     p.add_argument("--daily-loss-limit", type=Decimal, default=Decimal("3000"))
     p.add_argument("--underlying", default="NIFTY")
-    p.add_argument("--email", action="store_true", help="email the login link, entries, exits, errors and summary")
+    p.add_argument(
+        "--email", action="store_true", help="alerts by WhatsApp + email: login link, entries, exits, errors, summary"
+    )
     p.add_argument("--login-wait-minutes", type=int, default=120)
     p.add_argument("--access-token", default=os.environ.get("KITE_ACCESS_TOKEN"))
     args = p.parse_args()
@@ -99,7 +119,7 @@ def main() -> None:
 
     notify = None
     if args.email:
-        from scripts.momentum_email_report import send as notify
+        notify = background(__import__("scripts.momentum_email_report", fromlist=["send"]).send)
 
     api_key = os.environ.get("KITE_API_KEY") or sys.exit("Missing KITE_API_KEY in .env")
     api_secret = os.environ.get("KITE_API_SECRET") or sys.exit("Missing KITE_API_SECRET in .env")
