@@ -49,30 +49,98 @@ def log(msg: str) -> None:
     print(f"{datetime.now(IST).isoformat(timespec='seconds')} | {msg}", flush=True)
 
 
-def login(api_key: str, api_secret: str, access_token: str | None):
+SESSION_FILE = ROOT / "scripts" / "state" / "kite_session.json"  # gitignored; token dies 06:00 IST
+
+
+def _cached_token() -> str | None:
+    try:
+        data = json.loads(SESSION_FILE.read_text())
+    except (OSError, ValueError):
+        return None
+    if datetime.fromisoformat(data["expires_at"]) > datetime.now(IST):
+        return data["access_token"]
+    return None
+
+
+def _save_token(token: str) -> None:
+    now = datetime.now(IST)
+    six = now.replace(hour=6, minute=0, second=0, microsecond=0)
+    expires = six if now < six else six + timedelta(days=1)
+    SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SESSION_FILE.write_text(json.dumps({"access_token": token, "expires_at": expires.isoformat()}))
+
+
+def login(api_key: str, api_secret: str, access_token: str | None, request_token: str | None = None):
+    """Kite session for MARKET DATA. Order of preference: explicit access
+    token, today's cached token, a pasted request_token, then the browser
+    login (catching the redirect locally, via ngrok when NGROK_DOMAIN is set,
+    or by pasting the redirected URL / request_token into this window)."""
     from kiteconnect import KiteConnect
 
     kite = KiteConnect(api_key=api_key)
-    if access_token:
-        kite.set_access_token(access_token)
+    token = access_token or _cached_token()
+    if token:
+        kite.set_access_token(token)
+        try:
+            kite.profile()
+            log("Using existing Kite session")
+            return kite
+        except Exception:
+            log("Saved Kite session is no longer valid - logging in again")
+
+    def accept(tok: str) -> bool:
+        try:
+            data = kite.generate_session(tok, api_secret=api_secret)
+            _save_token(data["access_token"])
+            return True
+        except Exception as exc:
+            log(f"Rejected a login token ({type(exc).__name__}: {exc})")
+            return False
+
+    if request_token:
+        if not accept(request_token):
+            raise SystemExit("That request_token was rejected (they are single-use and expire in minutes)")
         return kite
 
-    from scripts.zerodha_rebalance import wait_for_login
+    import threading
+
+    from scripts.zerodha_rebalance import start_ngrok, wait_for_login
 
     port = int(os.environ.get("KITE_CALLBACK_PORT", "5010"))
     bind = os.environ.get("KITE_CALLBACK_BIND", "127.0.0.1")
-    deadline = datetime.now(IST) + timedelta(minutes=30)
-    log(f"Open this link to log in to Kite (waiting until {deadline:%H:%M} IST):\n  {kite.login_url()}")
-
-    def accept(token: str) -> bool:
+    ngrok_domain = os.environ.get("NGROK_DOMAIN", "").strip().removeprefix("https://").strip("/")
+    tunnel = None
+    if ngrok_domain:
         try:
-            kite.generate_session(token, api_secret=api_secret)
-            return True
+            tunnel = start_ngrok(ngrok_domain, port)
         except Exception as exc:
-            log(f"Rejected a login callback ({type(exc).__name__}: {exc}) - still waiting")
-            return False
+            log(f"ngrok not started ({exc}) - paste the redirected URL instead")
+    deadline = datetime.now(IST) + timedelta(minutes=30)
+    log(
+        f"Open this link to log in to Kite (waiting until {deadline:%H:%M} IST):\n  {kite.login_url()}\n"
+        "If the page after login doesn't load, copy the FULL address from the browser bar "
+        "(it contains request_token=...) and paste it here, then press Enter."
+    )
 
-    if not wait_for_login(bind, port, deadline, accept):
+    pasted = threading.Event()
+
+    def read_paste() -> None:
+        from urllib.parse import parse_qs, urlparse
+
+        for line in sys.stdin:
+            line = line.strip()
+            tok = parse_qs(urlparse(line).query).get("request_token", [line])[0]
+            if tok and accept(tok):
+                pasted.set()
+                return
+
+    threading.Thread(target=read_paste, daemon=True).start()
+    try:
+        ok = wait_for_login(bind, port, deadline, lambda tok: pasted.is_set() or accept(tok), stop=pasted)
+    finally:
+        if tunnel:
+            tunnel.terminate()
+    if not (ok or pasted.is_set()):
         raise SystemExit("No Kite login received - exiting")
     log("Kite session established (market data only)")
     return kite
@@ -128,6 +196,7 @@ def main() -> None:
     p.add_argument("--poll-seconds", type=int, default=5)
     p.add_argument("--max-trades", type=int, default=5)
     p.add_argument("--access-token", default=os.environ.get("KITE_ACCESS_TOKEN"))
+    p.add_argument("--request-token", help="request_token from the Kite login redirect URL")
     p.add_argument("--email", action="store_true", help="email the summary (uses the existing mail settings)")
     args = p.parse_args()
 
@@ -146,7 +215,7 @@ def main() -> None:
     )
     api_key = os.environ.get("KITE_API_KEY") or sys.exit("Missing KITE_API_KEY in .env")
     api_secret = os.environ.get("KITE_API_SECRET") or sys.exit("Missing KITE_API_SECRET in .env")
-    kite = ReadOnlyKite(login(api_key, api_secret, args.access_token))
+    kite = ReadOnlyKite(login(api_key, api_secret, args.access_token, args.request_token))
 
     report = asyncio.run(run_session(kite, config, log=log))
     path = JOURNAL_DIR / f"{datetime.now(IST):%Y-%m-%d}_{report.contract.tradingsymbol}.json"

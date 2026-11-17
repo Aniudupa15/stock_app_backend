@@ -191,7 +191,7 @@ def run_data_checks(data: dict, top: int, today: date) -> tuple[list[str], list[
 # ---------------------------------------------------------------- login
 
 
-def wait_for_login(host: str, port: int, deadline: datetime, accept) -> bool:
+def wait_for_login(host: str, port: int, deadline: datetime, accept, stop: threading.Event | None = None) -> bool:
     """Tiny HTTP server catching Kite's redirect with the request_token.
 
     `accept(token) -> bool` exchanges the token with Zerodha (needs our API
@@ -227,7 +227,9 @@ def wait_for_login(host: str, port: int, deadline: datetime, accept) -> bool:
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         while not done.is_set() and datetime.now(IST) < deadline:
-            done.wait(timeout=5)
+            if stop is not None and stop.is_set():
+                return True  # login completed another way (pasted token)
+            done.wait(timeout=1)
     finally:
         server.shutdown()
     return done.is_set()
