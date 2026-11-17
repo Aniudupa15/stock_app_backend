@@ -81,8 +81,11 @@ def instrument_token(kite, key: str) -> int:
     raise SystemExit(f"instrument {key} not found in Kite's {exchange} list")
 
 
-def fetch_minutes(kite, key: str, start: date, end: date) -> list[Candle]:
-    cache = CACHE_DIR / f"{key.replace(':', '_').replace(' ', '_')}_{start}_{end}.csv"
+KITE_INTERVALS = {"1m": "minute", "5m": "5minute"}
+
+
+def fetch_minutes(kite, key: str, start: date, end: date, interval: str = "1m") -> list[Candle]:
+    cache = CACHE_DIR / f"{key.replace(':', '_').replace(' ', '_')}_{interval}_{start}_{end}.csv"
     if cache.exists():
         log(f"Using cached {cache.name}")
         return read_csv(cache)
@@ -91,8 +94,8 @@ def fetch_minutes(kite, key: str, start: date, end: date) -> list[Candle]:
     cursor = start
     while cursor <= end:
         chunk_end = min(end, cursor + timedelta(days=CHUNK_DAYS - 1))
-        log(f"Downloading {key} 1-minute candles {cursor} -> {chunk_end}")
-        rows = kite.historical_data(token, cursor, chunk_end, "minute")
+        log(f"Downloading {key} {interval} candles from Kite {cursor} -> {chunk_end}")
+        rows = kite.historical_data(token, cursor, chunk_end, KITE_INTERVALS[interval])
         out += [
             Candle(
                 _aware(r["date"]),
@@ -107,6 +110,41 @@ def fetch_minutes(kite, key: str, start: date, end: date) -> list[Candle]:
         time_mod.sleep(0.4)  # stay under Kite's 3 requests/second
     write_csv(cache, out)
     return out
+
+
+def fetch_yahoo(name: str, start: date, end: date, interval: str) -> list[Candle]:
+    from services.trading_service.yahoo_intraday import available_start, fetch_candles, yahoo_symbol
+
+    first = max(start, available_start(interval))
+    if first > start:
+        log(f"Yahoo only serves {interval} candles from {first} - backtesting {first} -> {end}")
+    cache = CACHE_DIR / f"yahoo_{yahoo_symbol(name).strip('^')}_{interval}_{first}_{end}.csv"
+    if cache.exists():
+        log(f"Using cached {cache.name}")
+        return read_csv(cache)
+    log(f"Downloading {name} {interval} candles from Yahoo Finance {first} -> {end}")
+    out = fetch_candles(name, interval, first, end)
+    write_csv(cache, out)
+    return out
+
+
+class CandleSource:
+    """Kite historical data, falling back to Yahoo when the Kite Connect app
+    lacks historical-data permission (or when --source yahoo)."""
+
+    def __init__(self, kite, source: str, interval: str) -> None:
+        self.kite, self.source, self.interval = kite, source, interval
+
+    def get(self, name: str, kite_key: str, start: date, end: date) -> list[Candle]:
+        if self.source != "yahoo":
+            try:
+                return fetch_minutes(self.kite, kite_key, start, end, self.interval)
+            except Exception as exc:
+                if self.source == "kite" or "permission" not in str(exc).lower():
+                    raise
+                log("Kite says this app has no historical-data permission - using Yahoo Finance instead")
+                self.source = "yahoo"
+        return fetch_yahoo(name, start, end, self.interval)
 
 
 def current_lot_size(kite, underlying: str) -> int:
@@ -133,6 +171,18 @@ def main() -> None:
     p.add_argument("--vix-csv", type=Path, help="India VIX 1-minute candles (options, skip Kite)")
     p.add_argument("--access-token", default=os.environ.get("KITE_ACCESS_TOKEN"))
     p.add_argument("--request-token", help="request_token from the Kite login redirect URL")
+    p.add_argument(
+        "--source",
+        default="auto",
+        choices=["auto", "kite", "yahoo"],
+        help="auto = Kite, falling back to Yahoo if Kite refuses historical data",
+    )
+    p.add_argument(
+        "--interval",
+        default="1m",
+        choices=["1m", "5m"],
+        help="candle size; Yahoo serves 1m for ~30 days, 5m for ~60 days",
+    )
     p.add_argument("--trades-csv", type=Path, help="also write every trade to this CSV")
     args = p.parse_args()
 
@@ -146,11 +196,12 @@ def main() -> None:
         api_secret = os.environ.get("KITE_API_SECRET") or sys.exit("Missing KITE_API_SECRET in .env")
         kite = ReadOnlyKite(login(api_key, api_secret, args.access_token, args.request_token))
 
-    candles = read_csv(args.csv) if args.csv else fetch_minutes(kite, spot_key(underlying), args.start, args.end)
+    source = CandleSource(kite, args.source, args.interval)
+    candles = read_csv(args.csv) if args.csv else source.get(underlying, spot_key(underlying), args.start, args.end)
     vix = None
     if is_option:
         vix_candles = (
-            read_csv(args.vix_csv) if args.vix_csv else fetch_minutes(kite, "NSE:INDIA VIX", args.start, args.end)
+            read_csv(args.vix_csv) if args.vix_csv else source.get("INDIA VIX", "NSE:INDIA VIX", args.start, args.end)
         )
         vix = [(c.ts, c.close) for c in vix_candles]
     lot_size = args.lot_size or current_lot_size(kite, underlying)
@@ -164,6 +215,7 @@ def main() -> None:
         lot_size=lot_size,
         capital=args.capital,
         max_trades=args.max_trades,
+        candle_interval=args.interval,
     )
     log(f"Replaying {len(candles):,} candles ...")
     result = asyncio.run(run_fno_backtest(candles, config, vix=vix))

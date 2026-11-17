@@ -75,6 +75,7 @@ class FnoBacktestConfig:
     square_off: time = time(15, 15)
     slippage_bps: Decimal | None = None  # default: 1 bp futures, 20 bp option premium
     strike_step: int | None = None
+    candle_interval: str = "1m"  # bar size the strategy runs on (1m live default)
 
 
 @dataclass
@@ -105,7 +106,8 @@ class FnoBacktestResult:
         best = max(self.daily_pnl.values(), default=Decimal(0))
         pf = f"{m.profit_factor:.2f}" if m.profit_factor is not None else "n/a"
         out = [
-            f"Backtest: {c.underlying} {c.instrument}, {c.lots} lot(s) x {c.lot_size}, capital Rs{c.capital:,.0f}",
+            f"Backtest: {c.underlying} {c.instrument}, {c.lots} lot(s) x {c.lot_size}, "
+            f"capital Rs{c.capital:,.0f}, {c.candle_interval} bars",
             f"Period: {self.first_day} -> {self.last_day} ({self.days} trading days)",
             f"Trades: {m.total_trades}   Win rate: {m.win_rate:.1%}   Profit factor: {pf}",
             f"Net P&L (after charges): Rs{m.net_pnl:+,.2f}   Charges paid: Rs{self.total_charges:,.2f}",
