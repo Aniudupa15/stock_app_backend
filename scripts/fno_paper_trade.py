@@ -113,7 +113,15 @@ def _wait_for_redirect(host: str, port: int, deadline: datetime, accept, pasted)
     return done.is_set() or pasted.is_set()
 
 
-def login(api_key: str, api_secret: str, access_token: str | None, request_token: str | None = None):
+def login(
+    api_key: str,
+    api_secret: str,
+    access_token: str | None,
+    request_token: str | None = None,
+    *,
+    wait_minutes: int = 30,
+    notify=None,
+):
     """Kite session for MARKET DATA. Order of preference: explicit access
     token, today's cached token, a pasted request_token, then the browser
     login (catching the redirect locally, via ngrok when NGROK_DOMAIN is set,
@@ -158,13 +166,27 @@ def login(api_key: str, api_secret: str, access_token: str | None, request_token
             tunnel = start_ngrok(ngrok_domain, port)
         except Exception as exc:
             log(f"ngrok not started ({exc}) - paste the redirected URL instead")
-    deadline = datetime.now(IST) + timedelta(minutes=30)
+    deadline = datetime.now(IST) + timedelta(minutes=wait_minutes)
     # Kite echoes `redirect_params` back to the app's redirect URL. A hosted
     # callback (e.g. the rebalance bot's Lambda) can see fwd=local and bounce
     # the browser to this PC WITHOUT exchanging the single-use token.
     from urllib.parse import quote
 
-    login_link = f"{kite.login_url()}&redirect_params={quote(f'fwd=local&port={port}')}"
+    # With the tunnel up, the Lambda forwards to it (fwd=ngrok) so the login
+    # works from a phone; otherwise to 127.0.0.1 (a browser on this PC).
+    fwd = "fwd=ngrok" if tunnel else f"fwd=local&port={port}"
+    login_link = f"{kite.login_url()}&redirect_params={quote(fwd)}"
+    if notify is not None:
+        try:
+            notify(
+                "[PAPER] F&O session - log in to Kite",
+                f"Open before {deadline:%H:%M} IST"
+                + (" (any device)" if tunnel else " ON THE PC running the script")
+                + f":\n{login_link}\n\nMarket data only - paper trading places no orders.",
+            )
+            log("Login link emailed")
+        except Exception as exc:
+            log(f"could not email the login link: {exc}")
     log(
         f"Open this link to log in to Kite (waiting until {deadline:%H:%M} IST):\n  {login_link}\n"
         "If the page after login doesn't load, copy the FULL address from the browser bar "
@@ -183,7 +205,8 @@ def login(api_key: str, api_secret: str, access_token: str | None, request_token
                 pasted.set()
                 return
 
-    threading.Thread(target=read_paste, daemon=True).start()
+    if sys.stdin is not None:  # no console under Task Scheduler - nothing to paste into
+        threading.Thread(target=read_paste, daemon=True).start()
     try:
         ok = _wait_for_redirect(bind, port, deadline, accept, pasted)
     finally:
@@ -258,7 +281,8 @@ def main() -> None:
         help="open: trade only with the day (index vs its open); orb: 15-min opening-range breakout",
     )
     p.add_argument("--expiry", default="near", choices=["near", "next"], help="options: nearest or next expiry")
-    p.add_argument("--email", action="store_true", help="email the summary (uses the existing mail settings)")
+    p.add_argument("--email", action="store_true", help="email the login link and the summary (existing mail settings)")
+    p.add_argument("--login-wait-minutes", type=int, default=30, help="how long to wait for the Kite login")
     args = parse_with_preset(p)
 
     holidays = frozenset(
@@ -282,7 +306,19 @@ def main() -> None:
     )
     api_key = os.environ.get("KITE_API_KEY") or sys.exit("Missing KITE_API_KEY in .env")
     api_secret = os.environ.get("KITE_API_SECRET") or sys.exit("Missing KITE_API_SECRET in .env")
-    kite = ReadOnlyKite(login(api_key, api_secret, args.access_token, args.request_token))
+    notify = None
+    if args.email:
+        from scripts.momentum_email_report import send as notify
+    kite = ReadOnlyKite(
+        login(
+            api_key,
+            api_secret,
+            args.access_token,
+            args.request_token,
+            wait_minutes=args.login_wait_minutes,
+            notify=notify,
+        )
+    )
 
     report = asyncio.run(run_session(kite, config, log=log))
     path = JOURNAL_DIR / f"{datetime.now(IST):%Y-%m-%d}_{report.contract.tradingsymbol}.json"
