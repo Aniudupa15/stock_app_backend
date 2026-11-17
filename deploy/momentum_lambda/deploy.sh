@@ -69,7 +69,7 @@ from dotenv import dotenv_values
 v = dotenv_values(sys.argv[1])
 keys = ["KITE_API_KEY", "KITE_API_SECRET", "KITE_USER_ID", "BASKET_API_KEY", "BOT_CAPITAL_CAP", "BOT_TOP_N",
         "BOT_STOP_LOSS_PCT", "BOT_MIN_DAYS_BETWEEN", "NSE_HOLIDAYS", "ZERODHA_LIVE", "WHATSAPP_NOTIFY_URL",
-        "WHATSAPP_NOTIFY_SECRET", "WHATSAPP_TO", "MAIL_USERNAME", "MAIL_PASSWORD", "MAIL_FROM", "BOT_MAIL_TO", "MAIL_TO"]
+        "WHATSAPP_NOTIFY_SECRET", "WHATSAPP_TO", "NGROK_DOMAIN", "MAIL_USERNAME", "MAIL_PASSWORD", "MAIL_FROM", "BOT_MAIL_TO", "MAIL_TO"]
 env = {k: v[k] for k in keys if v.get(k)}
 env["DATABASE_URL"] = (v.get("MOMENTUM_DB_URL") or v["DATABASE_URL"]).replace("postgresql+asyncpg://", "postgresql://")
 env["STATE_BUCKET"] = sys.argv[2]
