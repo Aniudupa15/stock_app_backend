@@ -41,6 +41,7 @@ load_dotenv(ROOT / ".env")
 
 from libs.trading_calendar.calendar import IST  # noqa: E402
 from services.trading_service.fno_paper import ReadOnlyKite, SessionConfig, SessionReport, run_session  # noqa: E402
+from services.trading_service.fno_rules import PRESETS, parse_with_preset  # noqa: E402
 
 JOURNAL_DIR = ROOT / "scripts" / "state" / "fno_paper"
 
@@ -245,8 +246,20 @@ def main() -> None:
     p.add_argument("--max-trades", type=int, default=5)
     p.add_argument("--access-token", default=os.environ.get("KITE_ACCESS_TOKEN"))
     p.add_argument("--request-token", help="request_token from the Kite login redirect URL")
+    p.add_argument("--preset", choices=sorted(PRESETS), help="a tested variant, e.g. pe-trend (flags override it)")
+    p.add_argument("--sl-pct", type=Decimal, help="stop-loss %% (default: 0.5 futures / 15 options)")
+    p.add_argument("--target-pct", type=Decimal, help="target %% (default: 1 futures / 30 options)")
+    p.add_argument("--no-target", action="store_true", help="no fixed target: stop + trailing stop + 15:15 exit")
+    p.add_argument("--trail-pct", type=Decimal, help="trailing-stop distance %%")
+    p.add_argument(
+        "--trend-filter",
+        default="none",
+        choices=["none", "open", "orb"],
+        help="open: trade only with the day (index vs its open); orb: 15-min opening-range breakout",
+    )
+    p.add_argument("--expiry", default="near", choices=["near", "next"], help="options: nearest or next expiry")
     p.add_argument("--email", action="store_true", help="email the summary (uses the existing mail settings)")
-    args = p.parse_args()
+    args = parse_with_preset(p)
 
     holidays = frozenset(
         date.fromisoformat(d.strip()) for d in os.environ.get("NSE_HOLIDAYS", "").split(",") if d.strip()
@@ -260,6 +273,12 @@ def main() -> None:
         poll_seconds=args.poll_seconds,
         max_trades=args.max_trades,
         holidays=holidays,
+        sl_pct=args.sl_pct,
+        target_pct=args.target_pct,
+        no_target=args.no_target,
+        trail_pct=args.trail_pct,
+        trend_filter=args.trend_filter,
+        expiry=args.expiry,
     )
     api_key = os.environ.get("KITE_API_KEY") or sys.exit("Missing KITE_API_KEY in .env")
     api_secret = os.environ.get("KITE_API_SECRET") or sys.exit("Missing KITE_API_SECRET in .env")

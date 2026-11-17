@@ -527,3 +527,71 @@ async def test_contracts_added_after_construction_are_seen():
     registry.add(FUT)
     quotes.set(FUT.tradingsymbol, "24000")
     assert (await venue.place(_intent(FUT.tradingsymbol, Side.BUY, 75))).state is OrderState.COMPLETE
+
+
+# ---------------------------------------------------------------- live variants (presets)
+
+PE_ROWS = [
+    {"instrument_token": 7, "tradingsymbol": "NIFTY2610624000PE", "name": "NIFTY", "expiry": date(2026, 1, 6),
+     "strike": 24000.0, "tick_size": 0.05, "lot_size": 65, "instrument_type": "PE", "exchange": "NFO"},
+    {"instrument_token": 8, "tradingsymbol": "NIFTY2611324000PE", "name": "NIFTY", "expiry": date(2026, 1, 13),
+     "strike": 24000.0, "tick_size": 0.05, "lot_size": 65, "instrument_type": "PE", "exchange": "NFO"},
+]  # fmt: skip
+
+
+class TrendKite(FakeKite):
+    """Index sits `index_vs_open` points from today's open all day; the put's
+    premium follows the scripted V-shape so the EMA rule fires once."""
+
+    def __init__(self, clock, index_vs_open):
+        super().__init__(clock)
+        self.index_vs_open = index_vs_open
+
+    def instruments(self, exchange):
+        if exchange == "NFO":
+            return PE_ROWS
+        return [{"tradingsymbol": "NIFTY 50", "instrument_token": 256265}]
+
+    def ltp(self, keys):
+        return {k: {"last_price": 24000 + self.index_vs_open} for k in keys}
+
+    def ohlc(self, keys):
+        return {k: {"ohlc": {"open": 24000}} for k in keys}
+
+    def historical_data(self, token, start, end, interval):
+        return [{"high": 24050, "low": 23950}]
+
+    def quote(self, keys):
+        return {k: {"last_price": round((self._price() - 23700) / 2, 2), "volume": 5_000_000} for k in keys}
+
+
+async def _run_trend(index_vs_open, preset):
+    from services.trading_service.fno_rules import PRESETS
+
+    now = {"t": IST.localize(datetime(2026, 1, 5, 9, 10))}
+
+    async def sleep(seconds):
+        now["t"] += timedelta(seconds=seconds)
+
+    kite = TrendKite(lambda: now["t"], index_vs_open)
+    preset_kw = {k: v for k, v in PRESETS[preset].items()}
+    cfg = SessionConfig(underlying="NIFTY", poll_seconds=15, **preset_kw)
+    return await run_session(kite, cfg, clock=lambda: now["t"], sleep=sleep, log=lambda m: None), kite
+
+
+async def test_pe_trend_preset_trades_only_below_the_open():
+    down, kite = await _run_trend(-60, "pe-trend")
+    assert kite.order_calls == 0
+    assert down.contract.tradingsymbol == "NIFTY2610624000PE"  # nearest expiry
+    assert len(down.trades) == 1  # max 1 entry a day
+    assert down.trades[0].exit_reason is not ExitReason.TARGET  # no fixed target
+    up, _ = await _run_trend(+60, "pe-trend")
+    assert up.trades == []  # index above its open: puts never bought
+
+
+async def test_pe_orb_next_preset_uses_next_expiry_and_needs_a_breakdown():
+    broke, _ = await _run_trend(-60, "pe-orb-next")  # 23940 < opening-range low 23950
+    assert broke.contract.tradingsymbol == "NIFTY2611324000PE"
+    assert len(broke.trades) == 1
+    inside, _ = await _run_trend(-30, "pe-orb-next")  # 23970: below open but inside the range
+    assert inside.trades == []

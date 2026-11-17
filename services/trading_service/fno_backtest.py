@@ -42,6 +42,7 @@ from libs.oms.oms import OrderManagementSystem
 from libs.risk.gate import RiskGate, RiskProfile
 from libs.trading_calendar.calendar import IST, TradingCalendar
 from libs.trading_domain.entities import MarketQuote, Trade
+from services.trading_service import fno_rules
 from services.trading_service.fno_paper import PAPER_ACCOUNT_ID, StreamingIndicators, default_fno_strategy, exits_for
 
 STRIKE_STEPS = {"NIFTY": 50, "BANKNIFTY": 100, "FINNIFTY": 50, "MIDCPNIFTY": 25, "NIFTYNXT50": 100, "SENSEX": 100}
@@ -382,35 +383,17 @@ async def run_fno_backtest(
     )
 
 
-OPENING_RANGE_MINUTES = 15
-
-
-def _trend_ok(
-    mode: str, bullish: bool, close: Decimal, day_open: Decimal, or_high: Decimal, or_low: Decimal, or_done: bool
-) -> bool:
-    """Entry filter on the UNDERLYING (index) price:
-    open - only trade with the day: index above its open (FUT/CE) or below it (PE)
-    orb  - opening-range breakout: after the first 15 minutes, index beyond
-           that range's high (FUT/CE) or low (PE)."""
-    if mode == "none":
-        return True
-    if mode == "open":
-        return close > day_open if bullish else close < day_open
-    if mode == "orb":
-        return or_done and (close > or_high if bullish else close < or_low)
-    raise ValueError(f"unknown trend filter {mode!r}")
+OPENING_RANGE_MINUTES = fno_rules.OPENING_RANGE_MINUTES
+_trend_ok = fno_rules.trend_ok
 
 
 def _exit_rule(contract: FnoContract, config: FnoBacktestConfig):
-    base = exits_for(contract)
-    trailing = base.trailing
-    if config.trail_pct is not None and trailing is not None:
-        trailing = replace(trailing, value=config.trail_pct)
-    return replace(
-        base,
-        stop_loss_pct=config.sl_pct if config.sl_pct is not None else base.stop_loss_pct,
-        target_pct=None if config.no_target else (config.target_pct or base.target_pct),
-        trailing=trailing,
+    return fno_rules.override_exits(
+        exits_for(contract),
+        sl_pct=config.sl_pct,
+        target_pct=config.target_pct,
+        no_target=config.no_target,
+        trail_pct=config.trail_pct,
     )
 
 

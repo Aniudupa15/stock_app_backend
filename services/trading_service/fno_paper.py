@@ -20,11 +20,11 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from uuid import NAMESPACE_URL, uuid5
 
-from libs.broker.kite_quotes import KiteQuoteSource, load_fno_contracts
+from libs.broker.kite_quotes import KiteQuoteSource, load_fno_contracts, spot_key
 from libs.derivatives.contracts import ContractRegistry, FnoContract, InstrumentKind
 from libs.derivatives.margin import FnoMarginModel
 from libs.engine.paper_engine import PaperTradingEngine
@@ -35,6 +35,7 @@ from libs.strategy.engine import ExitRule, Strategy
 from libs.trading_calendar.calendar import IST, TradingCalendar
 from libs.trading_domain.entities import Fill, Trade, TrailingSpec
 from libs.trading_domain.enums import Product, Side
+from services.trading_service.fno_rules import OPENING_RANGE_MINUTES, override_exits, trend_ok
 
 PAPER_ACCOUNT_ID = uuid5(NAMESPACE_URL, "stock-app/fno-paper")
 
@@ -170,6 +171,13 @@ class SessionConfig:
     max_daily_loss: Decimal | None = None  # default: 2% of capital
     max_trades: int = 5
     holidays: frozenset[date] = frozenset()
+    # Strategy variant (same meaning as in the backtest; see fno_rules.PRESETS)
+    sl_pct: Decimal | None = None
+    target_pct: Decimal | None = None
+    no_target: bool = False
+    trail_pct: Decimal | None = None
+    trend_filter: str = "none"  # none | open | orb  (judged on the live index price)
+    expiry: str = "near"  # near | next  (options)
 
 
 @dataclass
@@ -213,13 +221,24 @@ class SessionReport:
 
 
 def pick_contract(
-    contracts: ContractRegistry, underlying: str, instrument: str, spot: Decimal, today: date
+    contracts: ContractRegistry,
+    underlying: str,
+    instrument: str,
+    spot: Decimal,
+    today: date,
+    expiry: str = "near",
 ) -> FnoContract:
     kind = InstrumentKind(instrument.upper())
     if kind is InstrumentKind.FUT:
         contract = contracts.nearest_future(underlying, today=today)
     else:
-        contract = contracts.atm_option(underlying, kind, spot, today=today)
+        chosen = None
+        if expiry == "next":
+            expiries = contracts.expiries(underlying, kind, on_or_after=today)
+            if len(expiries) < 2:
+                raise ValueError(f"no next expiry listed for {underlying} {kind.value}")
+            chosen = expiries[1]
+        contract = contracts.atm_option(underlying, kind, spot, today=today, expiry=chosen)
     if contract is None:
         raise ValueError(f"no live {kind.value} contract found for {underlying}")
     return contract
@@ -244,7 +263,7 @@ async def run_session(
     spot = (await quotes.spot_prices([config.underlying])).get(config.underlying)
     if spot is None:
         raise ValueError(f"no spot price for {config.underlying}")
-    contract = pick_contract(contracts, config.underlying, config.instrument, spot, today)
+    contract = pick_contract(contracts, config.underlying, config.instrument, spot, today, config.expiry)
     log(f"Spot {config.underlying} = {spot}; paper-trading {contract.tradingsymbol} (lot {contract.lot_size})")
 
     margin = FnoMarginModel()
@@ -263,7 +282,15 @@ async def run_session(
         max_open_positions=1,
         square_off_buffer_minutes=config.square_off_buffer_minutes,
     )
-    strategy = replace(default_fno_strategy(config.lots), exit=exits_for(contract))
+    exit_rule = override_exits(
+        exits_for(contract),
+        sl_pct=config.sl_pct,
+        target_pct=config.target_pct,
+        no_target=config.no_target,
+        trail_pct=config.trail_pct,
+    )
+    strategy = replace(default_fno_strategy(config.lots), exit=exit_rule)
+    trend = _TrendState(kite, quotes, config, contract.kind is not InstrumentKind.PE, log)
     engine = PaperTradingEngine(
         PAPER_ACCOUNT_ID,
         venue,
@@ -311,6 +338,8 @@ async def run_session(
             next_bar_at = now + timedelta(seconds=config.bar_seconds)
 
         allow_entry = features is not None and entries < config.max_trades
+        if allow_entry and config.trend_filter != "none":
+            allow_entry = await trend.allows(now)
         signal = await engine.process_tick(
             symbol, quote, features if allow_entry else None, prev_features if allow_entry else None
         )
@@ -339,3 +368,58 @@ async def run_session(
     report.fills = list(venue.fills)
     report.final_cash = venue.equity()
     return report
+
+
+class _TrendState:
+    """Live inputs for the trend filter: today's index open (from Kite's OHLC)
+    and the 15-minute opening range (from Kite's 1-minute history once the
+    range is complete - so starting the script late still gets it right)."""
+
+    def __init__(self, kite, quotes: KiteQuoteSource, config: SessionConfig, bullish: bool, log) -> None:
+        self._kite, self._quotes, self._config, self._bullish, self._log = kite, quotes, config, bullish, log
+        self._key = spot_key(config.underlying)
+        self.day_open: Decimal | None = None
+        self.or_high: Decimal | None = None
+        self.or_low: Decimal | None = None
+
+    async def _load_open(self) -> None:
+        raw = await asyncio.to_thread(self._kite.ohlc, [self._key])
+        value = (raw.get(self._key) or {}).get("ohlc", {}).get("open")
+        if value:
+            self.day_open = Decimal(str(value))
+            self._log(f"{self._config.underlying} opened at {self.day_open}")
+
+    async def _load_opening_range(self, now: datetime) -> None:
+        start = IST.localize(datetime.combine(now.date(), time(9, 15)))
+        end = start + timedelta(minutes=OPENING_RANGE_MINUTES)
+        token = next(
+            int(r["instrument_token"])
+            for r in await asyncio.to_thread(self._kite.instruments, self._key.split(":")[0])
+            if r["tradingsymbol"] == self._key.split(":", 1)[1]
+        )
+        rows = await asyncio.to_thread(self._kite.historical_data, token, start, end - timedelta(seconds=1), "minute")
+        if rows:
+            self.or_high = max(Decimal(str(r["high"])) for r in rows)
+            self.or_low = min(Decimal(str(r["low"])) for r in rows)
+            self._log(f"Opening range {self.or_low} - {self.or_high}")
+
+    async def allows(self, now: datetime) -> bool:
+        mode = self._config.trend_filter
+        or_done = (
+            now.astimezone(IST).time()
+            >= (datetime.combine(now.date(), time(9, 15)) + timedelta(minutes=OPENING_RANGE_MINUTES)).time()
+        )
+        try:
+            if self.day_open is None:
+                await self._load_open()
+            if mode == "orb" and or_done and self.or_high is None:
+                await self._load_opening_range(now)
+            spot = (await self._quotes.spot_prices([self._config.underlying]))[self._config.underlying]
+        except Exception as exc:  # no data -> no entry (never trade blind)
+            self._log(f"trend filter data error: {exc}")
+            return False
+        if self.day_open is None or (mode == "orb" and (self.or_high is None or self.or_low is None)):
+            return False
+        return trend_ok(
+            mode, self._bullish, spot, self.day_open, self.or_high or Decimal(0), self.or_low or Decimal(0), or_done
+        )

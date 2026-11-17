@@ -43,6 +43,7 @@ from services.trading_service.fno_backtest import (  # noqa: E402
     sweep_variants,
 )  # noqa: E402
 from services.trading_service.fno_paper import ReadOnlyKite  # noqa: E402
+from services.trading_service.fno_rules import PRESETS, parse_with_preset  # noqa: E402
 
 CACHE_DIR = ROOT / "scripts" / "state" / "fno_backtest"
 CHUNK_DAYS = 60  # Kite's limit for minute candles per request
@@ -189,6 +190,7 @@ def main() -> None:
         choices=["1m", "5m"],
         help="candle size; Yahoo serves 1m for ~30 days, 5m for ~60 days",
     )
+    p.add_argument("--preset", choices=sorted(PRESETS), help="a tested variant, e.g. pe-trend (flags override it)")
     p.add_argument("--sl-pct", type=Decimal, help="stop-loss %% (default: 0.5 futures / 15 options)")
     p.add_argument("--target-pct", type=Decimal, help="target %% (default: 1 futures / 30 options)")
     p.add_argument("--no-target", action="store_true", help="no fixed target: stop + trailing stop + 15:15 exit")
@@ -202,7 +204,7 @@ def main() -> None:
     p.add_argument("--expiry", default="near", choices=["near", "next"], help="options: nearest or next expiry")
     p.add_argument("--sweep", action="store_true", help="run a grid of variants and print a comparison table")
     p.add_argument("--trades-csv", type=Path, help="also write every trade to this CSV")
-    args = p.parse_args()
+    args = parse_with_preset(p)
 
     underlying = args.underlying.upper()
     is_option = args.instrument != "FUT"
