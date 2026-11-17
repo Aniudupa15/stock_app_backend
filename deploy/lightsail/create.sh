@@ -7,7 +7,7 @@
 set -euo pipefail
 REGION="${AWS_REGION:-ap-south-1}"
 NAME="${NAME:-fno-bot}"
-BUNDLE="${BUNDLE:-nano_3_0}"        # smallest plan with a public IPv4 (512 MB RAM; setup adds swap)
+BUNDLE="${BUNDLE:-nano_3_1}"        # smallest plan with a public IPv4 (512 MB RAM; setup adds swap)
 BLUEPRINT="${BLUEPRINT:-ubuntu_24_04}"
 ZONE="${ZONE:-${REGION}a}"
 KEY="${KEY:-$HOME/.ssh/$NAME.pem}"
