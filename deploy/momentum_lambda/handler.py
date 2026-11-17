@@ -727,6 +727,15 @@ def local_forward(q: dict) -> dict | None:
     listener on the SAME machine (127.0.0.1) without touching the single-use
     request_token, so the PC script can exchange it. Only localhost and a
     numeric port are ever used, so this can't redirect anywhere else."""
+    if q.get("fwd") == "ngrok":
+        # The PC script's ngrok tunnel (domain from this Lambda's own config,
+        # never from the URL) - lets the login be done from a phone.
+        domain = cfg("NGROK_DOMAIN").strip().removeprefix("https://").strip("/")
+        if not domain:
+            return page("Login not forwarded", "<p>NGROK_DOMAIN is not configured on the Lambda.</p>", 400)
+        keep = {k: q[k] for k in ("action", "type", "status", "request_token") if k in q}
+        target = f"https://{domain}/kite/callback?{urllib.parse.urlencode(keep)}"
+        return {"statusCode": 302, "headers": {"Location": target, "Cache-Control": "no-store"}, "body": ""}
     if q.get("fwd") != "local":
         return None
     port = q.get("port", "5010")
