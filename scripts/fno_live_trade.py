@@ -38,6 +38,9 @@ sys.path.insert(0, str(ROOT))
 from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv(ROOT / ".env")
+# Trading alerts go only to BOT_MAIL_TO (like the rebalance bot), not the shared report list.
+if os.environ.get("BOT_MAIL_TO"):
+    os.environ["MAIL_TO"] = os.environ["BOT_MAIL_TO"]
 
 from libs.trading_calendar.calendar import IST  # noqa: E402
 from scripts.fno_paper_trade import log, login  # noqa: E402
