@@ -76,6 +76,29 @@ class FnoBacktestConfig:
     slippage_bps: Decimal | None = None  # default: 1 bp futures, 20 bp option premium
     strike_step: int | None = None
     candle_interval: str = "1m"  # bar size the strategy runs on (1m live default)
+    # --- strategy variants (None = the live script's default for the contract) ---
+    sl_pct: Decimal | None = None
+    target_pct: Decimal | None = None
+    no_target: bool = False  # ride winners: stop + trailing stop + 15:15 exit only
+    trail_pct: Decimal | None = None
+    trend_filter: str = "none"  # none | open | orb  (see _trend_ok)
+    expiry: str = "near"  # near | next  (options: skip the nearest expiry)
+    label: str = ""
+
+    def describe(self) -> str:
+        parts = [f"max {self.max_trades}/day"]
+        if self.sl_pct is not None:
+            parts.append(f"SL {self.sl_pct}%")
+        parts.append(
+            "no target" if self.no_target else (f"target {self.target_pct}%" if self.target_pct else "default target")
+        )
+        if self.trail_pct is not None:
+            parts.append(f"trail {self.trail_pct}%")
+        if self.trend_filter != "none":
+            parts.append(f"trend={self.trend_filter}")
+        if self.instrument != "FUT" and self.expiry != "near":
+            parts.append(f"expiry={self.expiry}")
+        return ", ".join(parts)
 
 
 @dataclass
@@ -108,6 +131,7 @@ class FnoBacktestResult:
         out = [
             f"Backtest: {c.underlying} {c.instrument}, {c.lots} lot(s) x {c.lot_size}, "
             f"capital Rs{c.capital:,.0f}, {c.candle_interval} bars",
+            f"Variant: {c.label + ' - ' if c.label else ''}{c.describe()}",
             f"Period: {self.first_day} -> {self.last_day} ({self.days} trading days)",
             f"Trades: {m.total_trades}   Win rate: {m.win_rate:.1%}   Profit factor: {pf}",
             f"Net P&L (after charges): Rs{m.net_pnl:+,.2f}   Charges paid: Rs{self.total_charges:,.2f}",
@@ -267,6 +291,8 @@ async def run_fno_backtest(
             spot0 = day_candles[0].open
             strike = (spot0 / step).quantize(Decimal(1), rounding=ROUND_HALF_UP) * step
             expiry = expiry_for(config.underlying, day)
+            if config.expiry == "next":
+                expiry = expiry_for(config.underlying, expiry + timedelta(days=1))
             contract = FnoContract(
                 f"{config.underlying}{expiry:%y%m%d}{strike}{kind.value}",
                 config.underlying,
@@ -277,7 +303,7 @@ async def run_fno_backtest(
             )
             registry.add(contract)
 
-        strategy = replace(default_fno_strategy(config.lots), exit=exits_for(contract))
+        strategy = replace(default_fno_strategy(config.lots), exit=_exit_rule(contract, config))
         engine = PaperTradingEngine(
             PAPER_ACCOUNT_ID, venue, oms, RiskGate(), profile, TradingCalendar(), clock, [strategy],
             contracts=registry, margin_model=margin,
@@ -286,6 +312,10 @@ async def run_fno_backtest(
         indicators = StreamingIndicators()
         prev_features: dict | None = None
         entries = 0
+        day_open = day_candles[0].open
+        or_end = (datetime.combine(day, time(9, 15)) + timedelta(minutes=OPENING_RANGE_MINUTES)).time()
+        or_high, or_low = Decimal("-Infinity"), Decimal("Infinity")
+        bullish = kind is not InstrumentKind.PE  # FUT/CE profit from a rise, PE from a fall
 
         def price(underlying_price: Decimal, at: datetime, contract=contract) -> Decimal:
             if contract.kind is InstrumentKind.FUT:
@@ -299,6 +329,8 @@ async def run_fno_backtest(
             start = c.ts.astimezone(IST)
             if start.time() >= config.square_off:
                 break
+            if start.time() < or_end:
+                or_high, or_low = max(or_high, c.high), min(or_low, c.low)
             path = _path(c)
             for i, underlying_px in enumerate(path[:-1]):
                 clock_now["t"] = start + timedelta(seconds=15 * i)
@@ -310,7 +342,9 @@ async def run_fno_backtest(
             last_price = price(path[-1], clock_now["t"])
             quotes.prices[symbol] = last_price
             features = indicators.update(last_price)
-            allow = entries < config.max_trades
+            allow = entries < config.max_trades and _trend_ok(
+                config.trend_filter, bullish, c.close, day_open, or_high, or_low, start.time() >= or_end
+            )
             signal = await engine.process_tick(
                 symbol,
                 MarketQuote(symbol, last_price, day_volume=_LARGE_VOLUME),
@@ -346,3 +380,73 @@ async def run_fno_backtest(
         last_day=days[-1] if days else None,
         daily_pnl=daily_pnl,
     )
+
+
+OPENING_RANGE_MINUTES = 15
+
+
+def _trend_ok(
+    mode: str, bullish: bool, close: Decimal, day_open: Decimal, or_high: Decimal, or_low: Decimal, or_done: bool
+) -> bool:
+    """Entry filter on the UNDERLYING (index) price:
+    open - only trade with the day: index above its open (FUT/CE) or below it (PE)
+    orb  - opening-range breakout: after the first 15 minutes, index beyond
+           that range's high (FUT/CE) or low (PE)."""
+    if mode == "none":
+        return True
+    if mode == "open":
+        return close > day_open if bullish else close < day_open
+    if mode == "orb":
+        return or_done and (close > or_high if bullish else close < or_low)
+    raise ValueError(f"unknown trend filter {mode!r}")
+
+
+def _exit_rule(contract: FnoContract, config: FnoBacktestConfig):
+    base = exits_for(contract)
+    trailing = base.trailing
+    if config.trail_pct is not None and trailing is not None:
+        trailing = replace(trailing, value=config.trail_pct)
+    return replace(
+        base,
+        stop_loss_pct=config.sl_pct if config.sl_pct is not None else base.stop_loss_pct,
+        target_pct=None if config.no_target else (config.target_pct or base.target_pct),
+        trailing=trailing,
+    )
+
+
+def sweep_variants(base: FnoBacktestConfig) -> list[FnoBacktestConfig]:
+    """The comparison grid: baseline, then one idea at a time, then combos."""
+    fut = base.instrument == "FUT"
+    wide_sl, wide_trail = (Decimal("0.8"), Decimal("0.8")) if fut else (Decimal("30"), Decimal("30"))
+    v = [
+        ("baseline", {}),
+        ("fewer trades", {"max_trades": 2}),
+        ("with day trend", {"max_trades": 2, "trend_filter": "open"}),
+        ("opening-range breakout", {"max_trades": 2, "trend_filter": "orb"}),
+        ("ride winners", {"no_target": True, "sl_pct": wide_sl, "trail_pct": wide_trail}),
+        ("ORB + ride winners, 1/day",
+         {"max_trades": 1, "trend_filter": "orb", "no_target": True, "sl_pct": wide_sl, "trail_pct": wide_trail}),
+        ("trend + ride winners, 1/day",
+         {"max_trades": 1, "trend_filter": "open", "no_target": True, "sl_pct": wide_sl, "trail_pct": wide_trail}),
+    ]  # fmt: skip
+    if not fut:
+        v += [
+            ("next expiry, wide SL", {"expiry": "next", "sl_pct": wide_sl, "trail_pct": wide_trail}),
+            ("next expiry + ORB + ride, 1/day",
+             {"expiry": "next", "max_trades": 1, "trend_filter": "orb", "no_target": True,
+              "sl_pct": wide_sl, "trail_pct": wide_trail}),
+        ]  # fmt: skip
+    return [replace(base, label=name, **kw) for name, kw in v]
+
+
+def sweep_table(results: list[FnoBacktestResult]) -> list[str]:
+    head = f"{'Variant':34} {'Trades':>6} {'Win%':>6} {'PF':>5} {'Net P&L':>12} {'Charges':>10} {'MaxDD':>6}"
+    out = [head, "-" * len(head)]
+    for r in results:
+        m = r.metrics
+        pf = f"{m.profit_factor:.2f}" if m.profit_factor is not None else "n/a"
+        out.append(
+            f"{r.config.label[:34]:34} {m.total_trades:>6} {m.win_rate:>6.1%} {pf:>5} "
+            f"{m.net_pnl:>+12,.0f} {r.total_charges:>10,.0f} {m.max_drawdown_pct:>6.1%}"
+        )
+    return out

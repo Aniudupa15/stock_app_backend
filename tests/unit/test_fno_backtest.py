@@ -110,3 +110,54 @@ def test_candle_path_visits_nearer_extreme_first():
     assert _path(up) == [Decimal(100), Decimal(98), Decimal(110), Decimal(108)]
     down = Candle(up.ts, Decimal(100), Decimal(101), Decimal(90), Decimal(92))
     assert _path(down) == [Decimal(100), Decimal(101), Decimal(90), Decimal(92)]
+
+
+# ---------------------------------------------------------------- variants
+
+
+def test_trend_filter_rules():
+    from services.trading_service.fno_backtest import _trend_ok
+
+    D = Decimal
+    assert _trend_ok("open", True, D(101), D(100), D(0), D(0), True)
+    assert not _trend_ok("open", True, D(99), D(100), D(0), D(0), True)
+    assert _trend_ok("open", False, D(99), D(100), D(0), D(0), True)  # PE wants a falling day
+    assert not _trend_ok("orb", True, D(120), D(100), D(110), D(90), False)  # range not finished
+    assert _trend_ok("orb", True, D(111), D(100), D(110), D(90), True)
+    assert _trend_ok("orb", False, D(89), D(100), D(110), D(90), True)
+
+
+async def test_orb_filter_blocks_entries_on_a_day_that_never_breaks_out():
+    def fade(m):  # spikes in the first 15 min, then V-shape below that high
+        if m < 15:
+            return 24000 + 20 * m
+        return _v_shape(m) - 100
+
+    base = FnoBacktestConfig(lot_size=75)
+    plain = await run_fno_backtest(_day(date(2026, 1, 5), fade), base)
+    orb = await run_fno_backtest(_day(date(2026, 1, 5), fade), FnoBacktestConfig(lot_size=75, trend_filter="orb"))
+    assert plain.trades and not orb.trades
+
+
+async def test_no_target_rides_to_square_off():
+    result = await run_fno_backtest(
+        _day(date(2026, 1, 5), _v_shape),
+        FnoBacktestConfig(lot_size=75, no_target=True, sl_pct=Decimal("0.8"), trail_pct=Decimal("0.8")),
+    )
+    assert result.trades
+    assert all(t.exit_reason is not ExitReason.TARGET for t in result.trades)
+
+
+async def test_sweep_runs_every_variant_and_next_expiry_differs():
+    from services.trading_service.fno_backtest import sweep_table, sweep_variants
+
+    candles = _day(date(2026, 1, 5), _v_shape)
+    vix = [(c.ts, Decimal("13")) for c in candles]
+    variants = sweep_variants(FnoBacktestConfig(instrument="CE", lot_size=75))
+    assert len(variants) == 9 and variants[0].label == "baseline"
+    results = [await run_fno_backtest(candles, v, vix=vix) for v in variants]
+    table = sweep_table(results)
+    assert len(table) == 2 + len(variants)
+    near = results[0].trades[0].entry_price
+    nxt = next(r for r in results if r.config.expiry == "next" and r.trades).trades[0].entry_price
+    assert nxt > near  # 8-day option costs more than a 1-day one
