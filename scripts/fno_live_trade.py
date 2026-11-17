@@ -102,6 +102,7 @@ def journal(report: LiveReport, path: Path) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Live NIFTY put trading with the backtested pe-trend rules")
+    p.add_argument("--check", action="store_true", help="only run the live pre-flight checks, then exit (no trading)")
     p.add_argument("--live", action="store_true", help="send REAL orders (also needs FNO_LIVE=true in .env)")
     p.add_argument("--lots", type=int, default=1)
     p.add_argument("--max-lots", type=int, default=1)
@@ -128,10 +129,17 @@ def main() -> None:
     api_secret = os.environ.get("KITE_API_SECRET") or sys.exit("Missing KITE_API_SECRET in .env")
     kite = login(api_key, api_secret, args.access_token, wait_minutes=args.login_wait_minutes, notify=notify)
 
-    if live:
+    if live or args.check:
         allowed = {ip.strip() for ip in os.environ.get("KITE_ALLOWED_IPS", "").split(",") if ip.strip()}
         pf = preflight(kite, expected_user=os.environ.get("KITE_USER_ID"), allowed_ips=allowed, public_ip=public_ip())
         log("Pre-flight:\n  " + "\n  ".join(pf.lines))
+        if args.check:
+            fno = os.environ.get("FNO_LIVE", "false").strip().lower() == "true"
+            log(
+                f"FNO_LIVE={'true' if fno else 'false'} -> "
+                + ("live orders possible with --live" if fno else "dry run only")
+            )
+            sys.exit(0 if pf.ok else 1)
         if not pf.ok:
             if notify:
                 notify("[LIVE] F&O bot BLOCKED by pre-flight checks", "\n".join(pf.lines))
