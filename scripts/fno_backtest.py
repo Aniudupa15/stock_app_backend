@@ -35,7 +35,13 @@ load_dotenv(ROOT / ".env")
 from libs.broker.kite_quotes import spot_key  # noqa: E402
 from libs.derivatives.contracts import ContractRegistry, contracts_from_kite_instruments  # noqa: E402
 from libs.trading_calendar.calendar import IST  # noqa: E402
-from services.trading_service.fno_backtest import Candle, FnoBacktestConfig, run_fno_backtest  # noqa: E402
+from services.trading_service.fno_backtest import (  # noqa: E402
+    Candle,
+    FnoBacktestConfig,
+    run_fno_backtest,
+    sweep_table,
+    sweep_variants,
+)  # noqa: E402
 from services.trading_service.fno_paper import ReadOnlyKite  # noqa: E402
 
 CACHE_DIR = ROOT / "scripts" / "state" / "fno_backtest"
@@ -183,6 +189,18 @@ def main() -> None:
         choices=["1m", "5m"],
         help="candle size; Yahoo serves 1m for ~30 days, 5m for ~60 days",
     )
+    p.add_argument("--sl-pct", type=Decimal, help="stop-loss %% (default: 0.5 futures / 15 options)")
+    p.add_argument("--target-pct", type=Decimal, help="target %% (default: 1 futures / 30 options)")
+    p.add_argument("--no-target", action="store_true", help="no fixed target: stop + trailing stop + 15:15 exit")
+    p.add_argument("--trail-pct", type=Decimal, help="trailing-stop distance %%")
+    p.add_argument(
+        "--trend-filter",
+        default="none",
+        choices=["none", "open", "orb"],
+        help="open: trade only with the day (index vs its open); orb: 15-min opening-range breakout",
+    )
+    p.add_argument("--expiry", default="near", choices=["near", "next"], help="options: nearest or next expiry")
+    p.add_argument("--sweep", action="store_true", help="run a grid of variants and print a comparison table")
     p.add_argument("--trades-csv", type=Path, help="also write every trade to this CSV")
     args = p.parse_args()
 
@@ -216,10 +234,29 @@ def main() -> None:
         capital=args.capital,
         max_trades=args.max_trades,
         candle_interval=args.interval,
+        sl_pct=args.sl_pct,
+        target_pct=args.target_pct,
+        no_target=args.no_target,
+        trail_pct=args.trail_pct,
+        trend_filter=args.trend_filter,
+        expiry=args.expiry,
     )
-    log(f"Replaying {len(candles):,} candles ...")
-    result = asyncio.run(run_fno_backtest(candles, config, vix=vix))
-    print("\n".join(result.lines()))
+    if args.sweep:
+        variants = sweep_variants(config)
+        log(f"Sweeping {len(variants)} variants over {len(candles):,} candles ...")
+        results = [asyncio.run(run_fno_backtest(candles, v, vix=vix)) for v in variants]
+        first = results[0]
+        print(f"Sweep: {underlying} {args.instrument}, {args.lots} lot(s) x {lot_size}, {args.interval} bars, "
+              f"{first.first_day} -> {first.last_day} ({first.days} trading days)")  # fmt: skip
+        print("\n".join(sweep_table(results)))
+        best = max(results, key=lambda r: r.metrics.net_pnl)
+        print(f"\nBest: {best.config.label} ({best.config.describe()})")
+        print("A small sample: the best of several variants usually looks better than it will trade.")
+        result = best
+    else:
+        log(f"Replaying {len(candles):,} candles ...")
+        result = asyncio.run(run_fno_backtest(candles, config, vix=vix))
+        print("\n".join(result.lines()))
 
     if args.trades_csv:
         with args.trades_csv.open("w", newline="") as f:
