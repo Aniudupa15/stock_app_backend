@@ -8,11 +8,13 @@ set -euo pipefail
 # Retry transient network errors on reads (creates are guarded by the list checks below).
 export AWS_RETRY_MODE="${AWS_RETRY_MODE:-standard}" AWS_MAX_ATTEMPTS="${AWS_MAX_ATTEMPTS:-6}"
 REGION="${AWS_REGION:-ap-south-1}"
-NAME="${NAME:-fno-bot}"
+NAME="${NAME:-fno-bot-server}"   # instance (and "$NAME-ip" static IP)
+KEYNAME="${KEYNAME:-fno-bot}"     # SSH key pair - kept apart from the instance name (Lightsail
+                                  # rejected an instance named like the existing key pair)
 BUNDLE="${BUNDLE:-nano_3_1}"        # smallest plan with a public IPv4 (512 MB RAM; setup adds swap)
 BLUEPRINT="${BLUEPRINT:-ubuntu_24_04}"
 ZONE="${ZONE:-${REGION}a}"
-KEY="${KEY:-$HOME/.ssh/$NAME.pem}"
+KEY="${KEY:-$HOME/.ssh/$KEYNAME.pem}"
 lsail() { command aws --region "$REGION" lightsail "$@" | tr -d '\r'; }
 
 # --- sanity: the plan and image must exist in this region
@@ -37,20 +39,21 @@ if [ "$INSTANCES" = "0" ]; then
   read -r -p "Type YES to create it: " ok
   [ "$ok" = "YES" ] || { echo "Cancelled - nothing created."; exit 1; }
 
-  KEYPAIRS=$(lsail get-key-pairs --query "length(keyPairs[?name=='$NAME'])" --output text)
+  KEYPAIRS=$(lsail get-key-pairs --query "length(keyPairs[?name=='$KEYNAME'])" --output text)
   if [ "$KEYPAIRS" != "0" ] && [ ! -f "$KEY" ]; then
-    echo "Key pair '$NAME' exists in AWS but $KEY is missing - delete the key pair in the"
+    echo "Key pair '$KEYNAME' exists in AWS but $KEY is missing - delete the key pair in the"
     echo "Lightsail console (Account -> SSH keys) or set KEY=<path to the saved .pem>, then re-run."
     exit 1
   fi
   if [ "$KEYPAIRS" = "0" ]; then
     mkdir -p "$(dirname "$KEY")"
-    lsail create-key-pair --key-pair-name "$NAME" --query privateKeyBase64 --output text > "$KEY"
+    lsail create-key-pair --key-pair-name "$KEYNAME" --query privateKeyBase64 --output text > "$KEY"
     chmod 600 "$KEY"
     echo "SSH private key saved to $KEY (keep it private; never share or commit it)"
   fi
+  echo "Existing Lightsail instances in $REGION: $(lsail get-instances --query 'instances[].name' --output text)"
   lsail create-instances --instance-names "$NAME" --availability-zone "$ZONE" \
-    --blueprint-id "$BLUEPRINT" --bundle-id "$BUNDLE" --key-pair-name "$NAME" >/dev/null
+    --blueprint-id "$BLUEPRINT" --bundle-id "$BUNDLE" --key-pair-name "$KEYNAME" >/dev/null
 fi
 
 echo -n "Waiting for the instance to run"
