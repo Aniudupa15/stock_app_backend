@@ -3,8 +3,8 @@
 `Side` and `Product` are re-exported from `libs.charges` (the lower-level
 leaf package) rather than redefined, so there is exactly one canonical
 `Side`/`Product` identity across charges, the paper engine, and the OMS - no
-mapping, no drift. `Product` is MIS/CNC (equity) only; NRML/derivatives are
-deferred to a future phase.
+mapping, no drift. `Product` covers MIS/CNC (equity) and NRML (F&O carry-forward);
+F&O intraday uses MIS.
 """
 
 from __future__ import annotations
@@ -74,3 +74,4 @@ class ExitReason(str, Enum):
     SQUARE_OFF = "SQUARE_OFF"
     MANUAL = "MANUAL"
     SIGNAL = "SIGNAL"
+    EXPIRY = "EXPIRY"  # F&O contract settled at expiry

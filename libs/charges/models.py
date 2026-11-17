@@ -32,16 +32,17 @@ class Side(str, Enum):
 
 
 class Product(str, Enum):
-    """Only the two equity products that carry distinct charge schedules.
+    """Zerodha product codes.
 
-    MIS = intraday (auto-squared off same day); CNC = delivery (T+1 settled).
-    NRML (carry-forward, F&O) has its own schedule and is out of scope until a
-    derivatives phase - passing it here is a programming error, not a runtime
-    fallback.
+    MIS  = intraday (auto-squared off same day) - equity or F&O.
+    CNC  = equity delivery (T+1 settled). Not valid for F&O.
+    NRML = F&O carry-forward (held overnight up to expiry). Not valid for
+           cash equity; its charges come from `libs.charges.nse_fno`.
     """
 
     MIS = "MIS"
     CNC = "CNC"
+    NRML = "NRML"
 
 
 @dataclass(frozen=True, slots=True)

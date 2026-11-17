@@ -78,6 +78,8 @@ def compute(
         raise ValueError("quantity must be positive")
     if price <= 0:
         raise ValueError("price must be positive")
+    if product is Product.NRML:
+        raise ValueError("NRML is an F&O product - use libs.charges.nse_fno")
 
     turnover = Decimal(quantity) * price
 

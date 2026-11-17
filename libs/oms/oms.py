@@ -28,9 +28,10 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import uuid4
 
-from libs.charges.nse_equity import compute
+from libs.charges.router import charges_for
 from libs.trading_domain.entities import (
     BracketSpec,
+    Fill,
     OrderAck,
     OrderEvent,
     OrderIntent,
@@ -54,6 +55,8 @@ class _Bracket:
     sl_order_id: str | None = None
     target_order_id: str | None = None
     current_sl: Decimal | None = None
+    exit_order_id: str | None = None  # platform square-off (MARKET) order
+    pending_exit_reason: ExitReason | None = None
 
 
 @dataclass
@@ -100,11 +103,62 @@ class OrderManagementSystem:
     async def on_tick(self, quote) -> None:
         """Trailing-SL maintenance for active brackets on this symbol."""
         for bracket in list(self._brackets.values()):
-            if bracket.state != "ACTIVE" or bracket.spec.trailing is None:
+            if bracket.state != "ACTIVE" or bracket.spec.trailing is None or bracket.exit_order_id is not None:
                 continue
             if bracket.entry_intent.symbol != quote.symbol:
                 continue
             await self._maybe_trail(bracket, quote.ltp)
+
+    async def square_off(self, symbol: str, reason: ExitReason = ExitReason.SQUARE_OFF) -> int:
+        """Flatten every bracket on `symbol` at market (intraday square-off,
+        manual exit). Resting SL/target children are cancelled first so they
+        can't fire after the exit. Unfilled entries are simply cancelled.
+        Returns how many brackets an exit was sent for."""
+        sent = 0
+        for bracket in list(self._brackets.values()):
+            if bracket.entry_intent.symbol != symbol or bracket.state == "CLOSED":
+                continue
+            if bracket.state == "PENDING_ENTRY":
+                if bracket.entry_order_id is not None:
+                    await self._venue.cancel(bracket.entry_order_id)
+                bracket.state = "CLOSED"
+                continue
+            if bracket.exit_order_id is not None:
+                continue  # exit already in flight
+            await self._cancel_children(bracket)
+            exit_side = Side.SELL if bracket.direction == 1 else Side.BUY
+            bracket.pending_exit_reason = reason
+            bracket.exit_order_id = await self._place_child(bracket, exit_side, OrderType.MARKET)
+            sent += 1
+        return sent
+
+    def close_by_settlement(self, fill: Fill) -> None:
+        """An F&O contract expired and the venue settled the position. Close
+        the bracket and journal the trade at the settlement price."""
+        for bracket in self._brackets.values():
+            if bracket.entry_intent.symbol != fill.symbol or bracket.state == "CLOSED":
+                continue
+            if bracket.state == "PENDING_ENTRY":
+                bracket.state = "CLOSED"
+                continue
+            event = OrderEvent(fill.order_id, fill.intent_id, OrderState.COMPLETE, fill.qty, 0, fill.price, fill.ts)
+            bracket.state = "CLOSED"
+            self.trades.append(self._build_trade(bracket, event, ExitReason.EXPIRY))
+
+    def open_brackets(self, symbol: str | None = None) -> int:
+        return sum(
+            1
+            for b in self._brackets.values()
+            if b.state != "CLOSED" and (symbol is None or b.entry_intent.symbol == symbol)
+        )
+
+    async def _cancel_children(self, bracket: _Bracket) -> None:
+        for child_id in (bracket.sl_order_id, bracket.target_order_id):
+            if child_id is not None:
+                await self._venue.cancel(child_id)
+                self._order_to_bracket.pop(child_id, None)
+        bracket.sl_order_id = None
+        bracket.target_order_id = None
 
     # --- event handling ---
 
@@ -141,8 +195,13 @@ class OrderManagementSystem:
             )
 
     async def _close(self, bracket: _Bracket, exit_event: OrderEvent) -> None:
-        # Cancel the sibling (OCO).
         filled_id = exit_event.venue_order_id
+        if filled_id == bracket.exit_order_id:
+            bracket.state = "CLOSED"
+            reason = bracket.pending_exit_reason or ExitReason.SQUARE_OFF
+            self.trades.append(self._build_trade(bracket, exit_event, reason))
+            return
+        # Cancel the sibling (OCO).
         sibling = bracket.target_order_id if filled_id == bracket.sl_order_id else bracket.sl_order_id
         exit_reason = ExitReason.STOP_LOSS if filled_id == bracket.sl_order_id else ExitReason.TARGET
         if sibling is not None:
@@ -159,9 +218,10 @@ class OrderManagementSystem:
         entry_side = bracket.entry_intent.side
         exit_side = Side.SELL if entry_side is Side.BUY else Side.BUY
         product = bracket.entry_intent.product
-        charges_total = self._leg_charges(bracket.entry_order_id, entry_side, product, qty, entry) + self._leg_charges(
-            exit_event.venue_order_id, exit_side, product, qty, exit_price
-        )
+        exchange, symbol = bracket.entry_intent.exchange, bracket.entry_intent.symbol
+        charges_total = self._leg_charges(
+            bracket.entry_order_id, exchange, symbol, entry_side, product, qty, entry
+        ) + self._leg_charges(exit_event.venue_order_id, exchange, symbol, exit_side, product, qty, exit_price)
         return Trade(
             account_id=bracket.entry_intent.account_id,
             symbol=bracket.entry_intent.symbol,
@@ -221,7 +281,9 @@ class OrderManagementSystem:
             self._order_to_bracket[ack.venue_order_id] = bracket.bracket_id
         return ack.venue_order_id
 
-    def _leg_charges(self, order_id: str | None, side, product, qty: int, price: Decimal) -> Decimal:
+    def _leg_charges(
+        self, order_id: str | None, exchange: str, symbol: str, side, product, qty: int, price: Decimal
+    ) -> Decimal:
         # Prefer the venue's exact recorded charges (paper); fall back to
         # computing them (broker path - live actuals reconciled from the
         # contract note later).
@@ -232,7 +294,7 @@ class OrderManagementSystem:
                 return fill.charges.total
         if qty <= 0 or price <= 0:
             return Decimal("0")
-        return compute(side, product, qty, price).total
+        return charges_for(exchange, symbol, side, product, qty, price).total
 
     def _next_id(self, prefix: str) -> str:
         self._counter += 1
