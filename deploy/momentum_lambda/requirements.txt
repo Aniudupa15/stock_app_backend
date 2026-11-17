@@ -1,0 +1,6 @@
+pg8000==1.31.2
+# pg8000 1.31.2 needs scramp.make_channel_binding, removed in later scramp releases - pin the working set
+scramp==1.4.17
+asn1crypto==1.5.1
+python-dateutil==2.9.0.post0
+pytz==2024.2
