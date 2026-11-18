@@ -148,6 +148,7 @@ class BracketSpec:
     stop_loss: Decimal | None = None
     target: Decimal | None = None
     trailing: TrailingSpec | None = None
+    breakeven_pct: Decimal | None = None  # stop -> entry once up this % (never loosens it)
 
 
 @dataclass(frozen=True, slots=True)

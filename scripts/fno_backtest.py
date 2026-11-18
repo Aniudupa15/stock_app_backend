@@ -38,6 +38,7 @@ from libs.trading_calendar.calendar import IST  # noqa: E402
 from services.trading_service.fno_backtest import (  # noqa: E402
     Candle,
     FnoBacktestConfig,
+    breakeven_variants,
     run_fno_backtest,
     sweep_table,
     sweep_variants,
@@ -204,6 +205,12 @@ def main() -> None:
     )
     p.add_argument("--expiry", default="near", choices=["near", "next"], help="options: nearest or next expiry")
     p.add_argument("--sweep", action="store_true", help="run a grid of variants and print a comparison table")
+    p.add_argument("--breakeven-pct", type=Decimal, help="move the stop to the entry price once up this %%")
+    p.add_argument(
+        "--breakeven-sweep",
+        action="store_true",
+        help="same settings, only the breakeven rule changes: none vs +20/40/60%%",
+    )
     p.add_argument(
         "--max-risk",
         type=Decimal,
@@ -248,6 +255,7 @@ def main() -> None:
         max_trades=args.max_trades,
         candle_interval=args.interval,
         max_trade_risk=args.max_risk,
+        breakeven_pct=args.breakeven_pct,
         sl_pct=args.sl_pct,
         target_pct=args.target_pct,
         no_target=args.no_target,
@@ -255,8 +263,13 @@ def main() -> None:
         trend_filter=args.trend_filter,
         expiry=args.expiry,
     )
-    if args.sweep or args.target_sweep:
-        variants = target_variants(config) if args.target_sweep else sweep_variants(config)
+    if args.sweep or args.target_sweep or args.breakeven_sweep:
+        if args.breakeven_sweep:
+            variants = breakeven_variants(config)
+        elif args.target_sweep:
+            variants = target_variants(config)
+        else:
+            variants = sweep_variants(config)
         log(f"Sweeping {len(variants)} variants over {len(candles):,} candles ...")
         results = [asyncio.run(run_fno_backtest(candles, v, vix=vix)) for v in variants]
         first = results[0]

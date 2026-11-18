@@ -101,13 +101,17 @@ class OrderManagementSystem:
             await self._handle(event)
 
     async def on_tick(self, quote) -> None:
-        """Trailing-SL maintenance for active brackets on this symbol."""
+        """Stop maintenance for active brackets on this symbol: breakeven
+        first, then trailing (each only ever tightens the stop)."""
         for bracket in list(self._brackets.values()):
-            if bracket.state != "ACTIVE" or bracket.spec.trailing is None or bracket.exit_order_id is not None:
+            if bracket.state != "ACTIVE" or bracket.exit_order_id is not None:
                 continue
             if bracket.entry_intent.symbol != quote.symbol:
                 continue
-            await self._maybe_trail(bracket, quote.ltp)
+            if bracket.spec.breakeven_pct is not None:
+                await self._maybe_breakeven(bracket, quote.ltp)
+            if bracket.spec.trailing is not None:
+                await self._maybe_trail(bracket, quote.ltp)
 
     async def square_off(self, symbol: str, reason: ExitReason = ExitReason.SQUARE_OFF) -> int:
         """Flatten every bracket on `symbol` at market (intraday square-off,
@@ -237,6 +241,28 @@ class OrderManagementSystem:
             exit_reason=reason,
         )
 
+    async def _maybe_breakeven(self, bracket: _Bracket, ltp: Decimal) -> None:
+        entry = bracket.entry_price
+        if entry is None or bracket.sl_order_id is None:
+            return
+        move = entry * bracket.spec.breakeven_pct / Decimal("100")
+        if bracket.direction == 1:
+            reached = ltp >= entry + move
+            looser = bracket.current_sl is None or bracket.current_sl < entry
+        else:
+            reached = ltp <= entry - move
+            looser = bracket.current_sl is None or bracket.current_sl > entry
+        if reached and looser:
+            await self._move_stop(bracket, entry)
+
+    async def _move_stop(self, bracket: _Bracket, level: Decimal) -> None:
+        if bracket.sl_order_id is not None:
+            await self._venue.cancel(bracket.sl_order_id)
+            self._order_to_bracket.pop(bracket.sl_order_id, None)
+        exit_side = Side.SELL if bracket.direction == 1 else Side.BUY
+        bracket.current_sl = level
+        bracket.sl_order_id = await self._place_child(bracket, exit_side, OrderType.SL_M, trigger=level)
+
     async def _maybe_trail(self, bracket: _Bracket, ltp: Decimal) -> None:
         spec = bracket.spec.trailing
         distance = ltp * spec.value / Decimal("100") if spec.by == "PCT" else spec.value
@@ -250,13 +276,7 @@ class OrderManagementSystem:
             better = bracket.current_sl is None or candidate < bracket.current_sl
         if not (improves and better):
             return
-        # Cancel + replace the SL child at the tightened level.
-        if bracket.sl_order_id is not None:
-            await self._venue.cancel(bracket.sl_order_id)
-            self._order_to_bracket.pop(bracket.sl_order_id, None)
-        exit_side = Side.SELL if bracket.direction == 1 else Side.BUY
-        bracket.current_sl = candidate
-        bracket.sl_order_id = await self._place_child(bracket, exit_side, OrderType.SL_M, trigger=candidate)
+        await self._move_stop(bracket, candidate)  # cancel + replace at the tightened level
 
     async def _place_child(
         self,
