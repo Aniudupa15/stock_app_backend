@@ -161,3 +161,15 @@ async def test_sweep_runs_every_variant_and_next_expiry_differs():
     near = results[0].trades[0].entry_price
     nxt = next(r for r in results if r.config.expiry == "next" and r.trades).trades[0].entry_price
     assert nxt > near  # 8-day option costs more than a 1-day one
+
+
+async def test_target_sweep_changes_only_the_exit():
+    from services.trading_service.fno_backtest import target_variants
+
+    base = FnoBacktestConfig(instrument="PE", max_trades=1, trend_filter="open", sl_pct=Decimal("30"),
+                             trail_pct=Decimal("30"), no_target=True, lot_size=65)  # fmt: skip
+    vs = target_variants(base)
+    assert [v.label for v in vs] == ["no target (ride winners)", "target 30%", "target 60%", "target 100%"]
+    for v in vs:
+        assert (v.sl_pct, v.trail_pct, v.trend_filter, v.max_trades) == (Decimal("30"), Decimal("30"), "open", 1)
+    assert vs[0].no_target and not vs[1].no_target and vs[3].target_pct == Decimal(100)

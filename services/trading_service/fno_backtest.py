@@ -433,3 +433,11 @@ def sweep_table(results: list[FnoBacktestResult]) -> list[str]:
             f"{m.net_pnl:>+12,.0f} {r.total_charges:>10,.0f} {m.max_drawdown_pct:>6.1%}"
         )
     return out
+
+
+def target_variants(base: FnoBacktestConfig) -> list[FnoBacktestConfig]:
+    """A/B of the exit only: everything else exactly as `base`."""
+    out = [replace(base, label="no target (ride winners)", no_target=True, target_pct=None)]
+    for pct in (30, 60, 100):
+        out.append(replace(base, label=f"target {pct}%", no_target=False, target_pct=Decimal(pct)))
+    return out
