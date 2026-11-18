@@ -189,3 +189,36 @@ async def test_max_risk_skips_expensive_signals_like_the_live_bot():
     assert capped.trades == [] and capped.skipped_signals == 1  # skipped, and no retry that day
     roomy = await run_fno_backtest(candles, replace(base, max_trade_risk=risk + 500), vix=vix)
     assert len(roomy.trades) == 1 and roomy.skipped_signals == 0
+
+
+async def test_breakeven_lifts_stop_to_entry_and_caps_the_loss():
+    # Rally ~+50% after entry, then collapse: without breakeven the trailing
+    # stop (30% below the high) exits at a loss; with breakeven at +40% the
+    # stop sits at the entry price, so the trade exits around breakeven.
+    def spike_and_crash(m):
+        if m < 30:
+            return 24000 - 5 * m
+        if m < 60:
+            return 23850 + 3 * (m - 30)
+        return 23940 - 20 * (m - 60)
+
+    candles = _day(date(2026, 1, 5), spike_and_crash)
+    vix = [(c.ts, Decimal("13")) for c in candles]
+    base = FnoBacktestConfig(instrument="CE", lot_size=75, max_trades=1, no_target=True,
+                             sl_pct=Decimal("30"), trail_pct=Decimal("30"))  # fmt: skip
+    plain = await run_fno_backtest(candles, base, vix=vix)
+    be = await run_fno_backtest(candles, replace(base, breakeven_pct=Decimal("20")), vix=vix)
+    assert plain.trades and be.trades
+    t_plain, t_be = plain.trades[0], be.trades[0]
+    assert t_be.exit_price >= t_be.entry_price - Decimal("1")  # stopped at ~entry, not below
+    assert t_be.pnl_gross >= t_plain.pnl_gross
+
+
+def test_breakeven_sweep_changes_only_breakeven():
+    from services.trading_service.fno_backtest import breakeven_variants
+
+    base = FnoBacktestConfig(instrument="PE", max_trades=1, trend_filter="open", sl_pct=Decimal("30"),
+                             trail_pct=Decimal("30"), no_target=True, max_trade_risk=Decimal("3000"))  # fmt: skip
+    vs = breakeven_variants(base)
+    assert [v.breakeven_pct for v in vs] == [None, Decimal(20), Decimal(40), Decimal(60)]
+    assert all(v.no_target and v.max_trade_risk == Decimal("3000") and v.trend_filter == "open" for v in vs)

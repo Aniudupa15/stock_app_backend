@@ -63,6 +63,7 @@ def override_exits(
     target_pct: Decimal | None = None,
     no_target: bool = False,
     trail_pct: Decimal | None = None,
+    breakeven_pct: Decimal | None = None,
 ) -> ExitRule:
     trailing = base.trailing
     if trail_pct is not None and trailing is not None:
@@ -72,6 +73,7 @@ def override_exits(
         stop_loss_pct=sl_pct if sl_pct is not None else base.stop_loss_pct,
         target_pct=None if no_target else (target_pct or base.target_pct),
         trailing=trailing,
+        breakeven_pct=breakeven_pct if breakeven_pct is not None else base.breakeven_pct,
     )
 
 

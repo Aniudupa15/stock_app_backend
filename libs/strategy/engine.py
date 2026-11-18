@@ -27,6 +27,8 @@ class ExitRule:
     stop_loss_pct: Decimal | None = None
     target_pct: Decimal | None = None
     trailing: TrailingSpec | None = None
+    # Once the position is up this % from entry, lift the stop to the entry price.
+    breakeven_pct: Decimal | None = None
 
 
 @dataclass(frozen=True, slots=True)

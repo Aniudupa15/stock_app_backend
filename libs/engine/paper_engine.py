@@ -130,6 +130,7 @@ class PaperTradingEngine:
                 stop_loss=signal.stop_loss,
                 target=signal.targets[0] if signal.targets else None,
                 trailing=strategy.exit.trailing,
+                breakeven_pct=strategy.exit.breakeven_pct,
             )
             result = await self._oms.submit(intent, spec)
             await self._oms.process()  # place children as soon as the entry fills

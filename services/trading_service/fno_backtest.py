@@ -88,6 +88,7 @@ class FnoBacktestConfig:
     # Live bot rule: a signal whose stop-loss risk (qty x price x SL% + ~Rs60 charges)
     # exceeds this is SKIPPED and counts as the day's entry. None = no cap.
     max_trade_risk: Decimal | None = None
+    breakeven_pct: Decimal | None = None  # stop -> entry once the option is up this %
     label: str = ""
 
     def describe(self) -> str:
@@ -99,6 +100,8 @@ class FnoBacktestConfig:
         )
         if self.trail_pct is not None:
             parts.append(f"trail {self.trail_pct}%")
+        if self.breakeven_pct is not None:
+            parts.append(f"breakeven at +{self.breakeven_pct}%")
         if self.trend_filter != "none":
             parts.append(f"trend={self.trend_filter}")
         if self.max_trade_risk is not None:
@@ -421,6 +424,7 @@ def _exit_rule(contract: FnoContract, config: FnoBacktestConfig):
         target_pct=config.target_pct,
         no_target=config.no_target,
         trail_pct=config.trail_pct,
+        breakeven_pct=config.breakeven_pct,
     )
 
 
@@ -467,4 +471,12 @@ def target_variants(base: FnoBacktestConfig) -> list[FnoBacktestConfig]:
     out = [replace(base, label="no target (ride winners)", no_target=True, target_pct=None)]
     for pct in (30, 60, 100):
         out.append(replace(base, label=f"target {pct}%", no_target=False, target_pct=Decimal(pct)))
+    return out
+
+
+def breakeven_variants(base: FnoBacktestConfig) -> list[FnoBacktestConfig]:
+    """A/B of the breakeven rule only: everything else exactly as `base`."""
+    out = [replace(base, label="no breakeven (current)", breakeven_pct=None)]
+    for pct in (20, 40, 60):
+        out.append(replace(base, label=f"breakeven at +{pct}%", breakeven_pct=Decimal(pct)))
     return out
