@@ -3,6 +3,7 @@ test the mechanics (signals, fills, square-off, charges, option model), not
 the strategy's edge."""
 
 import math
+from dataclasses import replace
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
@@ -173,3 +174,18 @@ async def test_target_sweep_changes_only_the_exit():
     for v in vs:
         assert (v.sl_pct, v.trail_pct, v.trend_filter, v.max_trades) == (Decimal("30"), Decimal("30"), "open", 1)
     assert vs[0].no_target and not vs[1].no_target and vs[3].target_pct == Decimal(100)
+
+
+async def test_max_risk_skips_expensive_signals_like_the_live_bot():
+    candles = _day(date(2026, 1, 5), _v_shape)
+    vix = [(c.ts, Decimal("13")) for c in candles]
+    base = FnoBacktestConfig(instrument="CE", lot_size=75, max_trades=1, no_target=True,
+                             sl_pct=Decimal("30"), trail_pct=Decimal("30"))  # fmt: skip
+    free = await run_fno_backtest(candles, base, vix=vix)
+    assert free.trades
+    entry = free.trades[0].entry_price
+    risk = 75 * entry * Decimal("0.30") + 60  # entry includes ~0.2% slippage, hence the +-20 margins
+    capped = await run_fno_backtest(candles, replace(base, max_trade_risk=risk - 20), vix=vix)
+    assert capped.trades == [] and capped.skipped_signals == 1  # skipped, and no retry that day
+    roomy = await run_fno_backtest(candles, replace(base, max_trade_risk=risk + 500), vix=vix)
+    assert len(roomy.trades) == 1 and roomy.skipped_signals == 0
