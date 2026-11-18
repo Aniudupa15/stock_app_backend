@@ -41,6 +41,7 @@ from services.trading_service.fno_backtest import (  # noqa: E402
     run_fno_backtest,
     sweep_table,
     sweep_variants,
+    target_variants,
 )  # noqa: E402
 from services.trading_service.fno_paper import ReadOnlyKite  # noqa: E402
 from services.trading_service.fno_rules import PRESETS, parse_with_preset  # noqa: E402
@@ -203,6 +204,11 @@ def main() -> None:
     )
     p.add_argument("--expiry", default="near", choices=["near", "next"], help="options: nearest or next expiry")
     p.add_argument("--sweep", action="store_true", help="run a grid of variants and print a comparison table")
+    p.add_argument(
+        "--target-sweep",
+        action="store_true",
+        help="same settings, only the exit changes: no target vs 30/60/100%% targets",
+    )
     p.add_argument("--trades-csv", type=Path, help="also write every trade to this CSV")
     args = parse_with_preset(p)
 
@@ -243,8 +249,8 @@ def main() -> None:
         trend_filter=args.trend_filter,
         expiry=args.expiry,
     )
-    if args.sweep:
-        variants = sweep_variants(config)
+    if args.sweep or args.target_sweep:
+        variants = target_variants(config) if args.target_sweep else sweep_variants(config)
         log(f"Sweeping {len(variants)} variants over {len(candles):,} candles ...")
         results = [asyncio.run(run_fno_backtest(candles, v, vix=vix)) for v in variants]
         first = results[0]
