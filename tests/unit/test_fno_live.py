@@ -223,3 +223,23 @@ async def test_strike_is_chosen_at_the_0915_open_not_at_startup():
         clock=lambda: now["t"], sleep=sleep, log=lambda m: None,
     )  # fmt: skip
     assert seen[0] >= datetime(2026, 1, 5, 9, 15).time()
+
+
+async def test_breakeven_raises_exchange_stop_to_entry_then_exits_flat():
+    def pop_and_drop(m):  # dip, +25% pop after the entry, then a collapse
+        if m < 30:
+            return 150 - 2.5 * m
+        if m < 45:
+            return 75 + 3 * (m - 30)
+        if m < 52:
+            return 120 + 2 * (m - 45)
+        return max(5, 134 - 6 * (m - 52))
+
+    plain, _, _ = await _run(pop_and_drop, live=True, broker_cls=RecordingBroker, breakeven_pct=None)
+    be, broker, _ = await _run(pop_and_drop, live=True, broker_cls=RecordingBroker)  # default +20%
+    t_plain, t_be = plain.trades[0], be.trades[0]
+    # Stop sat at the entry price; in a fast fall it fills within the SL-limit's 5% buffer
+    # (here 104 vs 108), far above the 30%-trail level the plain run sold at.
+    assert t_be.exit >= t_be.entry * Decimal("0.95")
+    assert t_plain.exit < t_be.exit
+    assert t_be.net > t_plain.net

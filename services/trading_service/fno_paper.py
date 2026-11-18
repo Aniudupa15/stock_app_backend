@@ -178,6 +178,7 @@ class SessionConfig:
     trail_pct: Decimal | None = None
     trend_filter: str = "none"  # none | open | orb  (judged on the live index price)
     expiry: str = "near"  # near | next  (options)
+    breakeven_pct: Decimal | None = None
 
 
 @dataclass
@@ -288,6 +289,7 @@ async def run_session(
         target_pct=config.target_pct,
         no_target=config.no_target,
         trail_pct=config.trail_pct,
+        breakeven_pct=config.breakeven_pct,
     )
     strategy = replace(default_fno_strategy(config.lots), exit=exit_rule)
     trend = _TrendState(kite, quotes, config, contract.kind is not InstrumentKind.PE, log)

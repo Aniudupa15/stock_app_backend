@@ -107,6 +107,12 @@ def main() -> None:
     p.add_argument("--lots", type=int, default=1)
     p.add_argument("--max-lots", type=int, default=1)
     p.add_argument("--daily-loss-limit", type=Decimal, default=Decimal("3000"))
+    p.add_argument(
+        "--breakeven-pct",
+        type=Decimal,
+        default=Decimal("20"),
+        help="raise the stop to the entry price once up this %% (0 = off)",
+    )
     p.add_argument("--underlying", default="NIFTY")
     p.add_argument(
         "--email", action="store_true", help="alerts by WhatsApp + email: login link, entries, exits, errors, summary"
@@ -153,6 +159,7 @@ def main() -> None:
         lots=args.lots,
         max_lots=args.max_lots,
         daily_loss_limit=args.daily_loss_limit,
+        breakeven_pct=args.breakeven_pct or None,
         live=live,
         holidays=holidays,
     )
