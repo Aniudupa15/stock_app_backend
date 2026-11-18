@@ -72,6 +72,9 @@ class LiveConfig:
     sl_pct: Decimal = Decimal("30")
     trail_pct: Decimal = Decimal("30")
     trail_step: Decimal = Decimal("2")  # rupees, as in the backtest
+    # Lift the stop to the entry price once the put is up this % (backtest: better in
+    # both halves of Nov 2025 - Nov 2026). None disables it.
+    breakeven_pct: Decimal | None = Decimal("20")
     daily_loss_limit: Decimal = Decimal("3000")
     bar_seconds: int = 60
     poll_seconds: int = 5
@@ -431,8 +434,14 @@ async def run_live_session(
                             guard.modify(sl_id, price=tick_down(ltp * Decimal("0.95")))
                             triggered_since = now
                     else:
-                        candidate = tick_down(ltp * (1 - config.trail_pct / 100))
-                        if candidate - sl_trigger >= config.trail_step:
+                        trail = tick_down(ltp * (1 - config.trail_pct / 100))
+                        candidate = trail if trail - sl_trigger >= config.trail_step else None
+                        if config.breakeven_pct is not None and ltp >= trade.entry * (1 + config.breakeven_pct / 100):
+                            be_level = tick_down(trade.entry)
+                            if be_level > sl_trigger and (candidate is None or be_level > candidate):
+                                candidate = be_level
+                                log(f"BREAKEVEN: put up {config.breakeven_pct}% - stop raised to entry {be_level}")
+                        if candidate is not None:
                             sl_trigger = candidate
                             new_price = max(tick_down(candidate * (1 - config.sl_limit_buffer_pct / 100)), _TICK)
                             if sl_mods < config.max_sl_modifications:

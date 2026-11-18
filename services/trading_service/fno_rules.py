@@ -25,6 +25,7 @@ PRESETS: dict[str, dict] = {
         "no_target": True,
         "sl_pct": Decimal("30"),
         "trail_pct": Decimal("30"),
+        "breakeven_pct": Decimal("20"),
     },
     # Same exits, next-week expiry, entry only after NIFTY breaks below the
     # first 15 minutes' low.
