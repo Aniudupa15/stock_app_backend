@@ -40,6 +40,7 @@ from libs.execution.paper import PaperExecutionVenue
 from libs.execution.slippage import SlippageModel
 from libs.oms.oms import OrderManagementSystem
 from libs.risk.gate import RiskGate, RiskProfile
+from libs.strategy.engine import StrategyEvaluator
 from libs.trading_calendar.calendar import IST, TradingCalendar
 from libs.trading_domain.entities import MarketQuote, Trade
 from services.trading_service import fno_rules
@@ -84,6 +85,9 @@ class FnoBacktestConfig:
     trail_pct: Decimal | None = None
     trend_filter: str = "none"  # none | open | orb  (see _trend_ok)
     expiry: str = "near"  # near | next  (options: skip the nearest expiry)
+    # Live bot rule: a signal whose stop-loss risk (qty x price x SL% + ~Rs60 charges)
+    # exceeds this is SKIPPED and counts as the day's entry. None = no cap.
+    max_trade_risk: Decimal | None = None
     label: str = ""
 
     def describe(self) -> str:
@@ -97,6 +101,8 @@ class FnoBacktestConfig:
             parts.append(f"trail {self.trail_pct}%")
         if self.trend_filter != "none":
             parts.append(f"trend={self.trend_filter}")
+        if self.max_trade_risk is not None:
+            parts.append(f"skip if risk > Rs{self.max_trade_risk:,.0f}")
         if self.instrument != "FUT" and self.expiry != "near":
             parts.append(f"expiry={self.expiry}")
         return ", ".join(parts)
@@ -113,6 +119,7 @@ class FnoBacktestResult:
     first_day: date | None
     last_day: date | None
     daily_pnl: dict[date, Decimal] = field(default_factory=dict)
+    skipped_signals: int = 0
 
     def by_exit_reason(self) -> dict[str, tuple[int, Decimal]]:
         out: dict[str, list] = defaultdict(lambda: [0, Decimal(0)])
@@ -139,6 +146,11 @@ class FnoBacktestResult:
             f"Avg win: Rs{m.avg_win:,.2f}   Avg loss: Rs{m.avg_loss:,.2f}   Expectancy/trade: Rs{m.expectancy:+,.2f}",
             f"Max drawdown: {m.max_drawdown_pct:.2%}   Sharpe: {m.sharpe:.2f}   Max losing streak: {m.max_consecutive_losses}",
             f"Days: {green} green / {red} red / {self.days - green - red} flat   Best day: Rs{best:+,.2f}   Worst day: Rs{worst:+,.2f}",
+            *(
+                [f"Signals skipped (stop risk > Rs{c.max_trade_risk:,.0f}): {self.skipped_signals}"]
+                if c.max_trade_risk is not None
+                else []
+            ),
             "Exits: " + ", ".join(f"{k} {n} (Rs{p:+,.0f})" for k, (n, p) in sorted(self.by_exit_reason().items())),
         ]
         if c.instrument != "FUT":
@@ -283,6 +295,7 @@ async def run_fno_backtest(
     equity_curve: list[tuple[datetime, Decimal]] = []
     daily_pnl: dict[date, Decimal] = {}
     equity_before = config.capital
+    skipped = 0
 
     for day in sorted(by_day):
         day_candles = by_day[day]
@@ -305,6 +318,7 @@ async def run_fno_backtest(
             registry.add(contract)
 
         strategy = replace(default_fno_strategy(config.lots), exit=_exit_rule(contract, config))
+        evaluator = StrategyEvaluator()
         engine = PaperTradingEngine(
             PAPER_ACCOUNT_ID, venue, oms, RiskGate(), profile, TradingCalendar(), clock, [strategy],
             contracts=registry, margin_model=margin,
@@ -346,6 +360,18 @@ async def run_fno_backtest(
             allow = entries < config.max_trades and _trend_ok(
                 config.trend_filter, bullish, c.close, day_open, or_high, or_low, start.time() >= or_end
             )
+            if (
+                allow
+                and config.max_trade_risk is not None
+                and not oms.open_brackets(symbol)
+                and evaluator.evaluate(strategy, symbol, features, prev_features, last_price, clock_now["t"])
+            ):
+                qty = config.lots * config.lot_size
+                sl = strategy.exit.stop_loss_pct or Decimal(0)
+                if qty * last_price * sl / 100 + Decimal(60) > config.max_trade_risk:
+                    allow = False
+                    entries = config.max_trades  # as live: the skipped signal uses the day's entry
+                    skipped += 1
             signal = await engine.process_tick(
                 symbol,
                 MarketQuote(symbol, last_price, day_volume=_LARGE_VOLUME),
@@ -380,6 +406,7 @@ async def run_fno_backtest(
         first_day=days[0] if days else None,
         last_day=days[-1] if days else None,
         daily_pnl=daily_pnl,
+        skipped_signals=skipped,
     )
 
 

@@ -205,6 +205,11 @@ def main() -> None:
     p.add_argument("--expiry", default="near", choices=["near", "next"], help="options: nearest or next expiry")
     p.add_argument("--sweep", action="store_true", help="run a grid of variants and print a comparison table")
     p.add_argument(
+        "--max-risk",
+        type=Decimal,
+        help="skip signals whose stop-loss risk exceeds this, like the live bot (e.g. 3000)",
+    )
+    p.add_argument(
         "--target-sweep",
         action="store_true",
         help="same settings, only the exit changes: no target vs 30/60/100%% targets",
@@ -242,6 +247,7 @@ def main() -> None:
         capital=args.capital,
         max_trades=args.max_trades,
         candle_interval=args.interval,
+        max_trade_risk=args.max_risk,
         sl_pct=args.sl_pct,
         target_pct=args.target_pct,
         no_target=args.no_target,
