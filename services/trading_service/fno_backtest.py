@@ -89,6 +89,7 @@ class FnoBacktestConfig:
     # exceeds this is SKIPPED and counts as the day's entry. None = no cap.
     max_trade_risk: Decimal | None = None
     breakeven_pct: Decimal | None = None  # stop -> entry once the option is up this %
+    retry_after_skip: bool = False  # a too-expensive signal doesn't end the day; keep watching
     label: str = ""
 
     def describe(self) -> str:
@@ -100,6 +101,8 @@ class FnoBacktestConfig:
         )
         if self.trail_pct is not None:
             parts.append(f"trail {self.trail_pct}%")
+        if self.retry_after_skip:
+            parts.append("retry after skip")
         if self.breakeven_pct is not None:
             parts.append(f"breakeven at +{self.breakeven_pct}%")
         if self.trend_filter != "none":
@@ -393,7 +396,8 @@ async def run_fno_backtest(
                 sl = strategy.exit.stop_loss_pct or Decimal(0)
                 if qty * last_price * sl / 100 + Decimal(60) > config.max_trade_risk:
                     allow = False
-                    entries = config.max_trades  # as live: the skipped signal uses the day's entry
+                    if not config.retry_after_skip:
+                        entries = config.max_trades  # as live: the skipped signal uses the day's entry
                     skipped += 1
             signal = await engine.process_tick(
                 symbol,
@@ -500,3 +504,11 @@ def breakeven_variants(base: FnoBacktestConfig) -> list[FnoBacktestConfig]:
     for pct in (20, 40, 60):
         out.append(replace(base, label=f"breakeven at +{pct}%", breakeven_pct=Decimal(pct)))
     return out
+
+
+def retry_variants(base: FnoBacktestConfig) -> list[FnoBacktestConfig]:
+    """A/B of what a too-expensive signal does: end the day vs keep watching."""
+    return [
+        replace(base, label="skip ends the day (current)", retry_after_skip=False),
+        replace(base, label="keep watching after a skip", retry_after_skip=True),
+    ]
