@@ -222,3 +222,14 @@ def test_breakeven_sweep_changes_only_breakeven():
     vs = breakeven_variants(base)
     assert [v.breakeven_pct for v in vs] == [None, Decimal(20), Decimal(40), Decimal(60)]
     assert all(v.no_target and v.max_trade_risk == Decimal("3000") and v.trend_filter == "open" for v in vs)
+
+
+def test_retry_sweep_changes_only_the_skip_rule():
+    from services.trading_service.fno_backtest import retry_variants
+
+    base = FnoBacktestConfig(instrument="PE", max_trades=1, trend_filter="open", sl_pct=Decimal("30"),
+                             trail_pct=Decimal("30"), no_target=True, breakeven_pct=Decimal("20"),
+                             max_trade_risk=Decimal("3000"))  # fmt: skip
+    a, b = retry_variants(base)
+    assert (a.retry_after_skip, b.retry_after_skip) == (False, True)
+    assert replace(b, retry_after_skip=False, label=a.label) == a

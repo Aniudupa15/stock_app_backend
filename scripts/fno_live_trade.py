@@ -108,6 +108,11 @@ def main() -> None:
     p.add_argument("--max-lots", type=int, default=1)
     p.add_argument("--daily-loss-limit", type=Decimal, default=Decimal("3000"))
     p.add_argument(
+        "--retry-after-skip",
+        action="store_true",
+        help="after a too-expensive signal keep watching for a cheaper one (default: done for the day)",
+    )
+    p.add_argument(
         "--breakeven-pct",
         type=Decimal,
         default=Decimal("20"),
@@ -160,6 +165,7 @@ def main() -> None:
         max_lots=args.max_lots,
         daily_loss_limit=args.daily_loss_limit,
         breakeven_pct=args.breakeven_pct or None,
+        retry_after_skip=args.retry_after_skip,
         live=live,
         holidays=holidays,
     )

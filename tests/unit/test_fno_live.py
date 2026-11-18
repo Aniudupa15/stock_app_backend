@@ -243,3 +243,27 @@ async def test_breakeven_raises_exchange_stop_to_entry_then_exits_flat():
     assert t_be.exit >= t_be.entry * Decimal("0.95")
     assert t_plain.exit < t_be.exit
     assert t_be.net > t_plain.net
+
+
+def two_signals(m):  # 1st upturn on an expensive put (~Rs230), 2nd much later when it's ~Rs95
+    if m < 30:
+        return 300 - 3 * m
+    if m < 50:
+        return 210 + 4 * (m - 30)
+    if m < 110:
+        return 290 - 3.5 * (m - 50)
+    return min(200, 80 + 3 * (m - 110))
+
+
+async def test_skip_ends_the_day_by_default():
+    report, broker, _ = await _run(two_signals, live=True, broker_cls=RecordingBroker)
+    assert report.trades == [] and broker.placed == []
+    assert len(report.skipped) == 1
+
+
+async def test_retry_after_skip_takes_the_later_cheaper_signal():
+    report, broker, _ = await _run(two_signals, live=True, broker_cls=RecordingBroker, retry_after_skip=True)
+    assert len(report.skipped) >= 1
+    (trade,) = report.trades  # still max 1 trade a day
+    assert trade.entry < Decimal("150")
+    assert trade.entry_ts.time() > datetime(2026, 1, 5, 10, 30).time()

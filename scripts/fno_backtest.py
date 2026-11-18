@@ -39,6 +39,7 @@ from services.trading_service.fno_backtest import (  # noqa: E402
     Candle,
     FnoBacktestConfig,
     breakeven_variants,
+    retry_variants,
     run_fno_backtest,
     sweep_table,
     sweep_variants,
@@ -212,6 +213,16 @@ def main() -> None:
         help="same settings, only the breakeven rule changes: none vs +20/40/60%%",
     )
     p.add_argument(
+        "--retry-after-skip",
+        action="store_true",
+        help="a too-expensive signal doesn't end the day; keep watching for a cheaper one",
+    )
+    p.add_argument(
+        "--retry-sweep",
+        action="store_true",
+        help="compare: skip ends the day vs keep watching (everything else unchanged)",
+    )
+    p.add_argument(
         "--max-risk",
         type=Decimal,
         help="skip signals whose stop-loss risk exceeds this, like the live bot (e.g. 3000)",
@@ -256,6 +267,7 @@ def main() -> None:
         candle_interval=args.interval,
         max_trade_risk=args.max_risk,
         breakeven_pct=args.breakeven_pct,
+        retry_after_skip=args.retry_after_skip,
         sl_pct=args.sl_pct,
         target_pct=args.target_pct,
         no_target=args.no_target,
@@ -263,8 +275,10 @@ def main() -> None:
         trend_filter=args.trend_filter,
         expiry=args.expiry,
     )
-    if args.sweep or args.target_sweep or args.breakeven_sweep:
-        if args.breakeven_sweep:
+    if args.sweep or args.target_sweep or args.breakeven_sweep or args.retry_sweep:
+        if args.retry_sweep:
+            variants = retry_variants(config)
+        elif args.breakeven_sweep:
             variants = breakeven_variants(config)
         elif args.target_sweep:
             variants = target_variants(config)

@@ -75,6 +75,8 @@ class LiveConfig:
     # Lift the stop to the entry price once the put is up this % (backtest: better in
     # both halves of Nov 2025 - Nov 2026). None disables it.
     breakeven_pct: Decimal | None = Decimal("20")
+    # A signal skipped for stop risk > limit ends the day (as backtested) unless this is set.
+    retry_after_skip: bool = False
     daily_loss_limit: Decimal = Decimal("3000")
     bar_seconds: int = 60
     poll_seconds: int = 5
@@ -483,9 +485,10 @@ async def run_live_session(
                 and evaluator.evaluate(strategy, contract.tradingsymbol, features, prev_features, ltp, now) is not None
                 and await trend.allows(now)
             ):
-                entries += 1
                 risk = qty * ltp * config.sl_pct / 100 + Decimal(60)  # stop distance + ~charges
                 budget = config.daily_loss_limit + min(ledger.realised, Decimal(0))
+                if risk <= budget or not config.retry_after_skip:
+                    entries += 1  # a skip uses the day's entry unless retry_after_skip
                 if risk > budget:
                     msg = f"{now:%H:%M} signal @ {ltp} skipped: stop-loss risk Rs{risk:,.0f} > remaining limit Rs{budget:,.0f}"
                     log(msg)
