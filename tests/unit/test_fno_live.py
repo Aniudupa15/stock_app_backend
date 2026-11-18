@@ -202,3 +202,24 @@ def test_preflight_blocks_wrong_account_ip_or_open_positions():
     assert not preflight(held, expected_user="YUP337", allowed_ips={"1.2.3.4"}, public_ip="1.2.3.4").ok
     working = PreflightKite(orders=[{"order_id": "1", "tag": "fnobot", "status": "TRIGGER PENDING"}])
     assert not preflight(working, expected_user="YUP337", allowed_ips={"1.2.3.4"}, public_ip="1.2.3.4").ok
+
+
+async def test_strike_is_chosen_at_the_0915_open_not_at_startup():
+    seen = []
+
+    class GapKite(MarketKite):
+        def ltp(self, keys):  # yesterday's close before 09:15, gap-down open after
+            price = 24000 if self.clock().time() < datetime(2026, 1, 5, 9, 15).time() else 23700
+            seen.append(self.clock().time())
+            return {k: {"last_price": price} for k in keys}
+
+    now = {"t": IST.localize(datetime(2026, 1, 5, 9, 0))}
+
+    async def sleep(s):
+        now["t"] += timedelta(seconds=s)
+
+    await run_live_session(
+        GapKite(lambda: now["t"], v_shape), LiveConfig(poll_seconds=15),
+        clock=lambda: now["t"], sleep=sleep, log=lambda m: None,
+    )  # fmt: skip
+    assert seen[0] >= datetime(2026, 1, 5, 9, 15).time()

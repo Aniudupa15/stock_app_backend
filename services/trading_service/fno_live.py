@@ -295,6 +295,13 @@ async def run_live_session(
     calendar = TradingCalendar(holidays=set(config.holidays))
     today = clock().date()
 
+    # Pick the ATM strike from the 09:15 open, as the backtest does - before
+    # that, NIFTY's LTP is still yesterday's close (wrong strike on gap days).
+    if calendar.is_trading_day(today):
+        open_at = calendar.continuous_window(today)[0]
+        while clock().astimezone(IST).time() < open_at:
+            await sleep(config.poll_seconds)
+
     contracts = await load_fno_contracts(data, underlyings={config.underlying})
     quotes = KiteQuoteSource(data, contracts)
     spot = (await quotes.spot_prices([config.underlying]))[config.underlying]
