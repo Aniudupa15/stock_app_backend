@@ -132,6 +132,25 @@ class FnoBacktestResult:
             out[key][1] += t.pnl_net
         return {k: (v[0], v[1]) for k, v in out.items()}
 
+    def extreme_days(self, n: int = 5) -> list[str]:
+        """The n worst and n best days with dates, how many trades and the
+        monthly P&L - to see what bad stretches actually look like."""
+        days = sorted(self.daily_pnl.items(), key=lambda kv: kv[1])
+        traded = [(d, p) for d, p in days if p != 0]
+        if not traded:
+            return []
+        worst = [(d, p) for d, p in traded if p < 0][:n]
+        best = [(d, p) for d, p in traded[::-1] if p > 0][:n]
+        out = [f"Worst {n} days: " + (", ".join(f"{d} Rs{p:+,.0f}" for d, p in worst) or "none")]
+        out.append(f"Best {n} days:  " + (", ".join(f"{d} Rs{p:+,.0f}" for d, p in best) or "none"))
+        months: dict[str, Decimal] = defaultdict(Decimal)
+        for d, p in self.daily_pnl.items():
+            months[d.strftime("%Y-%m")] += p
+        out.append("Months: " + "  ".join(f"{m} {v:+,.0f}" for m, v in sorted(months.items())))
+        losing = sum(1 for v in months.values() if v < 0)
+        out.append(f"Losing months: {losing} of {len(months)}   Worst month: Rs{min(months.values()):+,.0f}")
+        return out
+
     def lines(self) -> list[str]:
         m, c = self.metrics, self.config
         green = sum(1 for v in self.daily_pnl.values() if v > 0)
@@ -161,6 +180,7 @@ class FnoBacktestResult:
         else:
             out.append("Futures prices are proxied by the index (basis ignored).")
         out.append("Past results do not guarantee future returns. Not investment advice.")
+        out += self.extreme_days()
         return out
 
 
