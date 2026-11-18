@@ -16,6 +16,9 @@ echo "== packages + timezone (cron below is IST)"
 sudo apt-get update -qq
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-venv python3-dev build-essential curl tzdata
 sudo timedatectl set-timezone Asia/Kolkata
+# cron reads the timezone when it starts; it was started before the change above,
+# so without a restart "0 9 * * 1-5" would fire at 09:00 UTC (14:30 IST).
+sudo systemctl restart cron
 
 echo "== python venv"
 [ -x "$PY" ] || python3 -m venv "$APP/.venv"
