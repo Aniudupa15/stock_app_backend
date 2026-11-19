@@ -157,6 +157,15 @@ def login(
 
     from scripts.zerodha_rebalance import start_ngrok
 
+    if not os.environ.get("NGROK_PATH"):  # cron's minimal PATH can't see /usr/local/bin
+        import shutil
+
+        found = shutil.which("ngrok") or next(
+            (p for p in ("/usr/local/bin/ngrok", "/usr/bin/ngrok", "/snap/bin/ngrok") if os.path.exists(p)), None
+        )
+        if found:
+            os.environ["NGROK_PATH"] = found
+
     port = int(os.environ.get("KITE_CALLBACK_PORT", "5010"))
     bind = os.environ.get("KITE_CALLBACK_BIND", "127.0.0.1")
     ngrok_domain = os.environ.get("NGROK_DOMAIN", "").strip().removeprefix("https://").strip("/")
