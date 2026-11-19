@@ -157,6 +157,12 @@ def login(
 
     from scripts.zerodha_rebalance import start_ngrok
 
+    configured = os.environ.get("NGROK_PATH")
+    if configured and not os.path.exists(configured):
+        # .env is shared between the Windows PC and the Linux server (push.sh copies it), so a
+        # Windows NGROK_PATH is meaningless here - ignore it and look ngrok up instead.
+        log(f"NGROK_PATH {configured!r} does not exist on this machine - looking for ngrok instead")
+        del os.environ["NGROK_PATH"]
     if not os.environ.get("NGROK_PATH"):  # cron's minimal PATH can't see /usr/local/bin
         import shutil
 
