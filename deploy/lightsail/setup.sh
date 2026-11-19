@@ -39,6 +39,8 @@ echo "== cron: F&O bot 09:00 Mon-Fri (DRY RUN unless FNO_LIVE=true in .env AND -
 mkdir -p "$APP/scripts/state" "$APP/logs"
 CRON=$(cat <<CR
 # --- fno bot (managed by deploy/lightsail/setup.sh) ---
+# cron's default PATH (/usr/bin:/bin) misses /usr/local/bin, where ngrok lives.
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 0 9 * * 1-5  cd $APP && $PY scripts/fno_live_trade.py --email >> logs/fno_live.log 2>&1
 # --- end fno bot ---
 CR
