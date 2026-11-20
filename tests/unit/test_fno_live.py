@@ -153,6 +153,7 @@ async def test_signal_skipped_when_stop_risk_exceeds_daily_limit():
 async def test_no_entry_when_index_is_above_its_open():
     report, _, _ = await _run(v_shape, index_vs_open=+60)
     assert report.trades == [] and report.orders == []
+    assert report.skipped and "ignored: trend filter (NIFTY above its open 24000)" in report.skipped[0]
 
 
 async def test_gap_through_stop_is_chased_with_lower_limit():

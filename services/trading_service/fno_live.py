@@ -476,15 +476,24 @@ async def run_live_session(
             if now >= next_bar_at:
                 features = indicators.update(ltp)
                 next_bar_at = now + timedelta(seconds=config.bar_seconds)
-            if (
+            signal = (
                 features is not None
                 and state == "FLAT"
                 and entries < config.max_trades
                 and t < config.last_entry
                 and ledger.realised > -config.daily_loss_limit
                 and evaluator.evaluate(strategy, contract.tradingsymbol, features, prev_features, ltp, now) is not None
-                and await trend.allows(now)
-            ):
+            )
+            if signal and not await trend.allows(now):
+                side = "above" if contract.kind is InstrumentKind.PE else "below"
+                msg = (
+                    f"{now:%H:%M} signal @ {ltp} ignored: trend filter "
+                    f"(NIFTY {side} its open {trend.day_open if trend.day_open is not None else '?'})"
+                )
+                log(msg)
+                report.skipped.append(msg)
+                signal = False
+            if signal:
                 risk = qty * ltp * config.sl_pct / 100 + Decimal(60)  # stop distance + ~charges
                 budget = config.daily_loss_limit + min(ledger.realised, Decimal(0))
                 if risk <= budget or not config.retry_after_skip:
@@ -514,6 +523,8 @@ async def run_live_session(
             break
         await sleep(config.poll_seconds)
 
+    if not report.trades and not report.skipped and "Not a trading day" not in " ".join(report.notes):
+        report.notes.append("No entry signal today (the put's EMA 9/21 + RSI conditions never lined up).")
     if trade is not None and trade.exit is None:
         report.notes.append(
             "Position still open at the end - the exchange stop-loss is active and Zerodha auto-squares MIS ~15:20."
