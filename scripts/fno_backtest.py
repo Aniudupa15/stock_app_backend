@@ -39,6 +39,7 @@ from services.trading_service.fno_backtest import (  # noqa: E402
     Candle,
     FnoBacktestConfig,
     breakeven_variants,
+    dte_variants,
     retry_variants,
     run_fno_backtest,
     sweep_table,
@@ -223,6 +224,12 @@ def main() -> None:
         help="compare: skip ends the day vs keep watching (everything else unchanged)",
     )
     p.add_argument(
+        "--max-dte", type=int, help="options: only trade when expiry is within this many days (0 = expiry day only)"
+    )
+    p.add_argument(
+        "--dte-sweep", action="store_true", help="compare: any day vs expiry day only vs last 2 / 3 days to expiry"
+    )
+    p.add_argument(
         "--max-risk",
         type=Decimal,
         help="skip signals whose stop-loss risk exceeds this, like the live bot (e.g. 3000)",
@@ -268,6 +275,7 @@ def main() -> None:
         max_trade_risk=args.max_risk,
         breakeven_pct=args.breakeven_pct,
         retry_after_skip=args.retry_after_skip,
+        max_dte=args.max_dte,
         sl_pct=args.sl_pct,
         target_pct=args.target_pct,
         no_target=args.no_target,
@@ -275,8 +283,10 @@ def main() -> None:
         trend_filter=args.trend_filter,
         expiry=args.expiry,
     )
-    if args.sweep or args.target_sweep or args.breakeven_sweep or args.retry_sweep:
-        if args.retry_sweep:
+    if args.sweep or args.target_sweep or args.breakeven_sweep or args.retry_sweep or args.dte_sweep:
+        if args.dte_sweep:
+            variants = dte_variants(config)
+        elif args.retry_sweep:
             variants = retry_variants(config)
         elif args.breakeven_sweep:
             variants = breakeven_variants(config)
