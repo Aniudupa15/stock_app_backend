@@ -90,6 +90,9 @@ class FnoBacktestConfig:
     max_trade_risk: Decimal | None = None
     breakeven_pct: Decimal | None = None  # stop -> entry once the option is up this %
     retry_after_skip: bool = False  # a too-expensive signal doesn't end the day; keep watching
+    # Options only: trade only when the contract expires within this many calendar days
+    # (0 = expiry day only, 1 = expiry day and the day before, ...). None = any day.
+    max_dte: int | None = None
     label: str = ""
 
     def describe(self) -> str:
@@ -101,6 +104,8 @@ class FnoBacktestConfig:
         )
         if self.trail_pct is not None:
             parts.append(f"trail {self.trail_pct}%")
+        if self.max_dte is not None:
+            parts.append("expiry day only" if self.max_dte == 0 else f"<= {self.max_dte} days to expiry")
         if self.retry_after_skip:
             parts.append("retry after skip")
         if self.breakeven_pct is not None:
@@ -343,6 +348,11 @@ async def run_fno_backtest(
             )
             registry.add(contract)
 
+        dte_ok = (
+            config.max_dte is None
+            or contract.kind is InstrumentKind.FUT
+            or (contract.expiry - day).days <= config.max_dte
+        )
         strategy = replace(default_fno_strategy(config.lots), exit=_exit_rule(contract, config))
         evaluator = StrategyEvaluator()
         engine = PaperTradingEngine(
@@ -383,8 +393,10 @@ async def run_fno_backtest(
             last_price = price(path[-1], clock_now["t"])
             quotes.prices[symbol] = last_price
             features = indicators.update(last_price)
-            allow = entries < config.max_trades and _trend_ok(
-                config.trend_filter, bullish, c.close, day_open, or_high, or_low, start.time() >= or_end
+            allow = (
+                entries < config.max_trades
+                and dte_ok
+                and _trend_ok(config.trend_filter, bullish, c.close, day_open, or_high, or_low, start.time() >= or_end)
             )
             if (
                 allow
@@ -511,4 +523,14 @@ def retry_variants(base: FnoBacktestConfig) -> list[FnoBacktestConfig]:
     return [
         replace(base, label="skip ends the day (current)", retry_after_skip=False),
         replace(base, label="keep watching after a skip", retry_after_skip=True),
+    ]
+
+
+def dte_variants(base: FnoBacktestConfig) -> list[FnoBacktestConfig]:
+    """A/B of WHEN in the expiry cycle to trade: any day vs only close to expiry."""
+    return [
+        replace(base, label="any day (current)", max_dte=None),
+        replace(base, label="expiry day only", max_dte=0),
+        replace(base, label="expiry day + 1 day before", max_dte=1),
+        replace(base, label="last 3 days to expiry", max_dte=2),
     ]

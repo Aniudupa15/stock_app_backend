@@ -233,3 +233,17 @@ def test_retry_sweep_changes_only_the_skip_rule():
     a, b = retry_variants(base)
     assert (a.retry_after_skip, b.retry_after_skip) == (False, True)
     assert replace(b, retry_after_skip=False, label=a.label) == a
+
+
+async def test_max_dte_only_trades_close_to_expiry():
+    # Mon 2026-01-05 (NIFTY weekly expiry Tue 06 -> 1 day) and Wed 2026-01-07 (expiry Tue 13 -> 6 days)
+    candles = _day(date(2026, 1, 5), _v_shape) + _day(date(2026, 1, 7), _v_shape)
+    vix = [(c.ts, Decimal("13")) for c in candles]
+    base = FnoBacktestConfig(instrument="CE", lot_size=75, max_trades=1, no_target=True,
+                             sl_pct=Decimal("30"), trail_pct=Decimal("30"))  # fmt: skip
+    anyday = await run_fno_backtest(candles, base, vix=vix)
+    near = await run_fno_backtest(candles, replace(base, max_dte=1), vix=vix)
+    expiry_only = await run_fno_backtest(candles, replace(base, max_dte=0), vix=vix)
+    assert {t.entry_ts.date() for t in anyday.trades} == {date(2026, 1, 5), date(2026, 1, 7)}
+    assert {t.entry_ts.date() for t in near.trades} == {date(2026, 1, 5)}
+    assert expiry_only.trades == []
