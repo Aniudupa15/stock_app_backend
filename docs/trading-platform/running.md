@@ -135,3 +135,28 @@ Risk rails:
 
 Schedule `scripts/run_fno_live.bat` for 09:00 Mon-Fri. Add `--live` to it only
 after dry-run days look right. The journal is written to `scripts/state/fno_live/`.
+
+## End-of-day option strategies on real NSE prices
+
+```bash
+python scripts/fetch_fo_bhavcopy.py                       # once, resumable: NSE F&O bhavcopies 2019->today + Kite NIFTY/VIX dailies
+python scripts/eod_options_backtest.py --strategy all --grid
+python scripts/eod_options_backtest.py --strategy condor  # one strategy, default settings, full report
+```
+
+Four strategies (`libs/options_eod/strategies.py`): a monthly iron condor, a
+trend credit spread, a VIX-spike condor and a trend debit spread. They're
+backtested on **real** daily closing option prices from NSE's F&O bhavcopy;
+strikes are chosen by delta from implied volatility.
+
+How the backtest models a trade:
+- **Fills:** at the day's close, ±1 point slippage per leg per side.
+- **Charges:** Zerodha F&O charges are applied to every leg.
+- **Expiry:** positions still open settle at intrinsic value.
+- **Stops and targets** are checked at the close only.
+
+Grid output is sorted by the first 70% of the period (train). The test columns
+are the untouched last 30%. The pass criteria are: at least 100 trades, PF of
+1.3 or more, positive in most years, and a maximum drawdown under 20% of
+capital. Strategy 5 (expiry-day theta) isn't included, because it needs
+minute-level option data.
